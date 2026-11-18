@@ -74,7 +74,7 @@ app.post("/api/translate", (req, res) => {
 
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
-    return res.status(413).json({ success: false, message: "اندازه فایل نباید بیشتر از ۱۰۰ مگابایت باشد." });
+    return res.status(413).json({ success: false, message: "اندازه فایل نباید بیشتر از ۱ گیگابایت باشد." });
   }
   if (err) {
     return res.status(400).json({ success: false, message: err.message || "در دریافت فایل خطا رخ داد." });
