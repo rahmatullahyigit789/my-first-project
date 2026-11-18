@@ -10,7 +10,7 @@ fs.mkdirSync(uploadDir, { recursive: true });
 
 const upload = multer({
   dest: uploadDir,
-  limits: { fileSize: 100 * 1024 * 1024 },
+  limits: { fileSize: 1024 * 1024 * 1024 },
   fileFilter: (req, file, callback) => {
     if (!file.mimetype || !file.mimetype.startsWith("video/")) {
       return callback(new Error("فقط فایل ویدیویی پذیرفته می‌شود."));
