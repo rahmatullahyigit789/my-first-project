@@ -110,13 +110,14 @@
     const fileInput = document.getElementById("videoFile");
     const fileName = document.getElementById("fileName");
     const message = document.getElementById("message");
+    const submitButton = form.querySelector('button[type="submit"]');
 
     fileInput.addEventListener("change", () => {
       const file = fileInput.files[0];
       fileName.textContent = file ? "فایل انتخاب‌شده: " + file.name : "حداکثر اندازهٔ فایل: ۱۰۰ مگابایت";
     });
 
-    form.addEventListener("submit", (event) => {
+    form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const url = document.getElementById("videoUrl").value.trim();
       const file = fileInput.files[0];
@@ -126,11 +127,35 @@
         message.textContent = "لطفاً یک لینک وارد کنید یا یک فایل ویدیو انتخاب نمایید.";
         return;
       }
+      if (url && file) {
+        message.textContent = "لطفاً فقط لینک یا فایل ویدیو را انتخاب کنید، نه هر دو.";
+        return;
+      }
       if (file && file.size > 100 * 1024 * 1024) {
         message.textContent = "اندازهٔ فایل بیشتر از ۱۰۰ مگابایت است. لطفاً فایل کوچک‌تری انتخاب کنید.";
         return;
       }
-      message.textContent = "صفحه آماده است؛ اما موتور هوش مصنوعی ترجمه و دوبله هنوز وصل نشده است. در مرحلهٔ بعد بخش دریافت و پردازش ویدیو را فعال می‌کنیم.";
+
+      const payload = new FormData();
+      if (file) payload.append("video", file);
+      else payload.append("videoUrl", url);
+
+      submitButton.disabled = true;
+      submitButton.textContent = "در حال ارسال...";
+      try {
+        const response = await fetch("/api/intake", {
+          method: "POST",
+          body: payload
+        });
+        const result = await response.json();
+        message.textContent = result.message || "پاسخی از سرور دریافت نشد.";
+        if (!response.ok) message.textContent = "خطا: " + message.textContent;
+      } catch (error) {
+        message.textContent = "ارتباط با سرور برقرار نشد. لطفاً پس از فعال‌شدن میزبانی پروژه دوباره تلاش کنید.";
+      } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = "آماده‌سازی ترجمه";
+      }
     });
   </script>
 </body>
