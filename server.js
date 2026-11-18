@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
+const path = require("path");
 
 const app = express();
 const upload = multer({
@@ -10,10 +11,10 @@ const upload = multer({
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static("public"));
+app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/", (req, res) => {
-  res.send("Video Translator Server is running!");
+  res.sendFile(path.join(__dirname, "index.html"));
 });
 
 app.get("/api/health", (req, res) => {
