@@ -79,7 +79,7 @@
           فایل ویدیوی خود را از موبایل یا کمپیوتر انتخاب کنید
           <input id="videoFile" type="file" accept="video/*">
         </div>
-        <p class="hint" id="fileName">حداکثر اندازهٔ فایل: ۱۰۰ مگابایت</p>
+        <p class="hint" id="fileName">حداکثر اندازهٔ فایل: ۱ گیگابایت</p>
 
         <div class="grid">
           <div>
@@ -131,8 +131,8 @@
         message.textContent = "لطفاً فقط لینک یا فایل ویدیو را انتخاب کنید، نه هر دو.";
         return;
       }
-      if (file && file.size > 100 * 1024 * 1024) {
-        message.textContent = "اندازهٔ فایل بیشتر از ۱۰۰ مگابایت است. لطفاً فایل کوچک‌تری انتخاب کنید.";
+      if (file && file.size > 1024 * 1024 * 1024) {
+        message.textContent = "اندازهٔ فایل بیشتر از ۱ گیگابایت است. لطفاً فایل کوچک‌تری انتخاب کنید.";
         return;
       }
 
