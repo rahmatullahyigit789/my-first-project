@@ -60,11 +60,26 @@ app.post("/api/translate", upload.single("video"), async (req, res) => {
     if (status !== "ACTIVE") throw new Error("آماده‌سازی ویدیو بیش از حد طول کشید؛ دوباره تلاش کنید.");
 
     const prompt = `گفتار ویدیوی پیوست را با حفظ ترتیب و زمان‌بندی به زبان دری افغانستان ترجمه کن. فقط زیرنویس SRT معتبر برگردان؛ هیچ توضیح اضافه نده. شماره هر قطعه، زمان شروع و پایان با قالب HH:MM:SS,mmm و متن طبیعی دری باشد. زمان‌ها باید با گفتار واقعی هماهنگ باشند. اگر بخشی گفتار ندارد، برای آن زیرنویس نساز. زبان اصلی را خودت تشخیص بده.`;
-    const result = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: [createPartFromUri(remoteFile.uri, remoteFile.mimeType), prompt],
-      config: { temperature: 0.2 }
-    });
+    let result;
+    let lastModelError;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        result = await ai.models.generateContent({
+          model: "gemini-3.8-flash",
+          contents: [createPartFromUri(remoteFile.uri, remoteFile.mimeType), prompt],
+          config: { temperature: 0.2 }
+        });
+        lastModelError = null;
+        break;
+      } catch (modelError) {
+        lastModelError = modelError;
+        const status = Number(modelError.status || modelError.code || 0);
+        const retryable = [429, 500, 502, 503, 504].includes(status);
+        if (!retryable || attempt === 3) throw modelError;
+        await new Promise(resolve => setTimeout(resolve, 2000 * (attempt + 1)));
+      }
+    }
+    if (lastModelError || !result) throw lastModelError || new Error("پاسخی از Gemini دریافت نشد.");
     const srt = srtClean(result.text);
     if (!srt || !/\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3}/.test(srt)) {
       throw new Error("Gemini زیرنویس SRT معتبر تولید نکرد. لطفاً ویدیوی کوتاه‌تری آزمایش کنید.");
@@ -72,7 +87,12 @@ app.post("/api/translate", upload.single("video"), async (req, res) => {
     res.json({ success: true, status: "translated", language: "دری افغانستان", srt });
   } catch (error) {
     console.error("Translation error:", error);
-    res.status(500).json({ success: false, message: error.message || "در ترجمه ویدیو خطا رخ داد." });
+    const status = Number(error.status || error.code || 0);
+    const httpStatus = [429, 500, 502, 503, 504].includes(status) ? 503 : 500;
+    const message = httpStatus === 503
+      ? "سرویس هوش مصنوعی فعلاً شلوغ است. چند دقیقه بعد دوباره تلاش کنید."
+      : (error.message || "در ترجمه ویدیو خطا رخ داد.");
+    res.status(httpStatus).json({ success: false, message });
   } finally {
     if (tempPath) fs.promises.unlink(tempPath).catch(() => {});
     if (remoteFile?.name && process.env.GEMINI_API_KEY) {
