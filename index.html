@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#10182c">
-  <title>ترجمان ویدیو | ترجمه به دری</title>
+  <title>ترجمان ویدیو | زیرنویس دری</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -64,45 +64,23 @@
       <div class="logo">🌐🎬</div>
       <div class="eyebrow">پروژهٔ ترجمان هوشمند ویدیو</div>
       <h1>ویدیوی خود را به دری ترجمه کنید</h1>
-      <p>لینک ویدیو یا فایل آن را انتخاب کنید. هدف این پروژه ساخت زیرنویس و دوبله به زبان دری است.</p>
+      <p>فعلاً فایل ویدیو را می‌گیرد و زیرنویس دری با فرمت SRT می‌سازد.</p>
     </header>
 
     <section class="panel">
-      <h2>شروع ترجمه</h2>
+      <h2>ساخت زیرنویس دری</h2>
       <form id="translateForm">
-        <label for="videoUrl">لینک ویدیو</label>
-        <input id="videoUrl" type="url" placeholder="https://example.com/video" dir="ltr">
-        <p class="hint">فعلاً لینک‌های شبکه‌های اجتماعی هنوز به سیستم دریافت ویدیو وصل نشده‌اند.</p>
-
-        <label for="videoFile">یا فایل ویدیو را انتخاب کنید</label>
+        <label for="videoFile">فایل ویدیو را انتخاب کنید</label>
         <div class="upload">
-          فایل ویدیوی خود را از موبایل یا کمپیوتر انتخاب کنید
-          <input id="videoFile" type="file" accept="video/*">
+          ویدیوی کوتاه انتخاب کنید
+          <input id="videoFile" type="file" accept="video/*" required>
         </div>
-        <p class="hint" id="fileName">حداکثر اندازهٔ فایل: ۱ گیگابایت</p>
-
-        <div class="grid">
-          <div>
-            <label for="outputLanguage">زبان ترجمه</label>
-            <select id="outputLanguage">
-              <option value="fa-AF">دری افغانستان</option>
-              <option value="fa">فارسی</option>
-            </select>
-          </div>
-          <div>
-            <label for="outputType">نوع خروجی</label>
-            <select id="outputType">
-              <option value="both">زیرنویس و دوبله</option>
-              <option value="subtitle">فقط زیرنویس</option>
-              <option value="dubbing">فقط دوبله</option>
-            </select>
-          </div>
-        </div>
-        <button type="submit">آماده‌سازی ترجمه</button>
+        <p class="hint" id="fileName">حداکثر اندازهٔ فایل: ۱ گیگابایت. لینک مستقیم اینستاگرام و Threads هنوز فعال نشده است.</p>
+        <button type="submit">ساخت زیرنویس دری</button>
       </form>
       <div id="message" role="status"></div>
     </section>
-    <footer>نسخهٔ ابتدایی پروژه — امکانات ترجمه و دوبله در مرحلهٔ بعد وصل می‌شوند.</footer>
+    <footer>دوبله و دریافت مستقیم لینک شبکه‌های اجتماعی هنوز در دست ساخت است.</footer>
   </main>
 
   <script>
@@ -111,47 +89,27 @@
     const fileName = document.getElementById("fileName");
     const message = document.getElementById("message");
     const submitButton = form.querySelector('button[type="submit"]');
+    let activeJob = false;
 
     fileInput.addEventListener("change", () => {
       const file = fileInput.files[0];
-      fileName.textContent = file ? "فایل انتخاب‌شده: " + file.name : "حداکثر اندازهٔ فایل: ۱ گیگابایت";
+      fileName.textContent = file ? "فایل انتخاب‌شده: " + file.name : "حداکثر اندازهٔ فایل: ۱ گیگابایت.";
     });
 
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const url = document.getElementById("videoUrl").value.trim();
-      const file = fileInput.files[0];
-
+    function showMessage(text, success = false) {
       message.style.display = "block";
-      if (!url && !file) {
-        message.textContent = "لطفاً یک لینک وارد کنید یا یک فایل ویدیو انتخاب نمایید.";
-        return;
-      }
-      if (url && file) {
-        message.textContent = "لطفاً فقط لینک یا فایل ویدیو را انتخاب کنید، نه هر دو.";
-        return;
-      }
-      if (file && file.size > 1024 * 1024 * 1024) {
-        message.textContent = "اندازهٔ فایل بیشتر از ۱ گیگابایت است. لطفاً فایل کوچک‌تری انتخاب کنید.";
-        return;
-      }
+      message.className = success ? "success" : "";
+      message.textContent = text;
+    }
 
-      const payload = new FormData();
-      if (file) payload.append("video", file);
-      else payload.append("videoUrl", url);
-
-      submitButton.disabled = true;
-      submitButton.textContent = "در حال ارسال...";
-      try {
-        const response = await fetch("/api/translate", {
-          method: "POST",
-          body: payload
-        });
+    async function pollJob(jobId) {
+      for (;;) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        const response = await fetch("/api/jobs/" + encodeURIComponent(jobId));
         const result = await response.json();
-        if (!response.ok || !result.success) {
-          message.textContent = "خطا: " + (result.message || "ترجمه انجام نشد.");
-        } else {
-          message.textContent = "ترجمه به دری آماده شد. زیرنویس SRT را از دکمه پایین بگیرید.";
+        if (!response.ok) throw new Error(result.message || "وضعیت پردازش دریافت نشد.");
+        if (result.status === "completed") {
+          showMessage(result.message || "زیرنویس دری آماده شد.", true);
           const blob = new Blob([result.srt], { type: "text/plain;charset=utf-8" });
           const downloadUrl = URL.createObjectURL(blob);
           const link = document.createElement("a");
@@ -164,12 +122,38 @@
           message.appendChild(document.createElement("br"));
           message.appendChild(link);
           link.addEventListener("click", () => setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000), { once: true });
+          return;
         }
+        if (result.status === "failed") throw new Error(result.message || "ترجمه انجام نشد.");
+        showMessage(result.message || "در حال پردازش ویدیو…");
+      }
+    }
+
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      if (activeJob) return;
+      const file = fileInput.files[0];
+      if (!file) return showMessage("لطفاً فایل ویدیو را انتخاب کنید.");
+      if (file.size > 1024 * 1024 * 1024) return showMessage("اندازهٔ فایل بیشتر از ۱ گیگابایت است.");
+      activeJob = true;
+      submitButton.disabled = true;
+      submitButton.textContent = "در حال ارسال ویدیو…";
+      showMessage("ویدیو در حال ارسال به سرور است؛ پس از ثبت درخواست، وضعیت ترجمه نمایش داده می‌شود.");
+      try {
+        const payload = new FormData();
+        payload.append("video", file);
+        const response = await fetch("/api/translate", { method: "POST", body: payload });
+        const result = await response.json();
+        if (!response.ok || !result.success || !result.jobId) throw new Error(result.message || "درخواست ترجمه ثبت نشد.");
+        submitButton.textContent = "ترجمه در جریان است…";
+        showMessage("درخواست ثبت شد. اکنون زیرنویس دری در پس‌زمینه ساخته می‌شود.");
+        await pollJob(result.jobId);
       } catch (error) {
-        message.textContent = "ارتباط با سرور برقرار نشد. لطفاً پس از فعال‌شدن میزبانی پروژه دوباره تلاش کنید.";
+        showMessage("خطا: " + (error.message || "ارتباط با سرور برقرار نشد."));
       } finally {
+        activeJob = false;
         submitButton.disabled = false;
-        submitButton.textContent = "آماده‌سازی ترجمه";
+        submitButton.textContent = "ساخت زیرنویس دری";
       }
     });
   </script>
