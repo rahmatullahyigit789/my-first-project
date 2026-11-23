@@ -4,6 +4,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
+const crypto = require("crypto");
 const { GoogleGenAI, createPartFromUri } = require("@google/genai");
 
 const app = express();
@@ -26,80 +27,148 @@ app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 app.get("/api/health", (req, res) => res.json({
   status: "ok",
   geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
-  translation: "video-to-dari-srt"
+  translation: "async-video-to-dari-srt"
 }));
 
-function srtClean(value) {
-  return String(value || "").replace(/\x60{3}(?:srt)?/gi, "").trim();
+// Jobs live in memory for this single Railway replica. A restart clears active jobs.
+const jobs = new Map();
+const JOB_TTL_MS = 60 * 60 * 1000;
+
+function cleanupJobs() {
+  const cutoff = Date.now() - JOB_TTL_MS;
+  for (const [id, job] of jobs) {
+    if (job.updatedAt < cutoff && job.status !== "processing") jobs.delete(id);
+  }
+}
+setInterval(cleanupJobs, 10 * 60 * 1000).unref();
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-app.post("/api/translate", upload.single("video"), async (req, res) => {
-  const tempPath = req.file?.path;
+function isRetryable(error) {
+  const status = Number(error?.status || error?.code || error?.response?.status || 0);
+  return [408, 429, 500, 502, 503, 504].includes(status);
+}
+
+function srtClean(value) {
+  return String(value || "").replace(/`{3}(?:srt)?/gi, "").trim();
+}
+
+async function processTranslation(jobId, file) {
+  const job = jobs.get(jobId);
+  if (!job) {
+    await fs.promises.unlink(file.path).catch(() => {});
+    return;
+  }
   let remoteFile;
   try {
-    if (!process.env.GEMINI_API_KEY) {
-      return res.status(503).json({ success: false, message: "کلید Gemini در سرور تنظیم نشده است." });
-    }
-    if (!req.file) {
-      return res.status(400).json({ success: false, message: "لطفاً فایل ویدیویی را انتخاب کنید. دریافت مستقیم لینک شبکه‌های اجتماعی هنوز فعال نیست." });
-    }
-
+    if (!process.env.GEMINI_API_KEY) throw new Error("کلید Gemini در سرور تنظیم نشده است.");
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    job.message = "ویدیو به سرویس هوش مصنوعی فرستاده شد؛ در حال آماده‌سازی فایل است.";
+    job.updatedAt = Date.now();
+
     remoteFile = await ai.files.upload({
-      file: tempPath,
-      config: { mimeType: req.file.mimetype, displayName: req.file.originalname }
+      file: file.path,
+      config: { mimeType: file.mimetype, displayName: file.originalname }
     });
 
     let status = remoteFile.state;
-    for (let i = 0; i < 60 && status !== "ACTIVE"; i++) {
-      if (status === "FAILED") throw new Error("پردازش فایل ویدیویی توسط Gemini ناموفق شد.");
-      await new Promise(resolve => setTimeout(resolve, 2000));
+    for (let i = 0; i < 90 && status !== "ACTIVE"; i++) {
+      if (status === "FAILED") throw new Error("آماده‌سازی ویدیو در Gemini ناموفق شد.");
+      await sleep(2000);
       remoteFile = await ai.files.get({ name: remoteFile.name });
       status = remoteFile.state;
+      job.message = "در حال آماده‌سازی ویدیو برای ترجمه…";
+      job.updatedAt = Date.now();
     }
-    if (status !== "ACTIVE") throw new Error("آماده‌سازی ویدیو بیش از حد طول کشید؛ دوباره تلاش کنید.");
+    if (status !== "ACTIVE") throw new Error("آماده‌سازی ویدیو بیش از سه دقیقه طول کشید.");
 
-    const prompt = `گفتار ویدیوی پیوست را با حفظ ترتیب و زمان‌بندی به زبان دری افغانستان ترجمه کن. فقط زیرنویس SRT معتبر برگردان؛ هیچ توضیح اضافه نده. شماره هر قطعه، زمان شروع و پایان با قالب HH:MM:SS,mmm و متن طبیعی دری باشد. زمان‌ها باید با گفتار واقعی هماهنگ باشند. اگر بخشی گفتار ندارد، برای آن زیرنویس نساز. زبان اصلی را خودت تشخیص بده.`;
+    const prompt = "گفتار ویدیوی پیوست را با حفظ ترتیب و زمان‌بندی به زبان دری افغانستان ترجمه کن. فقط زیرنویس SRT معتبر برگردان؛ هیچ توضیح اضافه نده. زمان‌ها را با قالب HH:MM:SS,mmm بنویس و با گفتار واقعی هماهنگ کن. اگر بخشی گفتار ندارد، برای آن زیرنویس نساز. زبان اصلی را خودت تشخیص بده.";
     let result;
-    let lastModelError;
-    for (let attempt = 0; attempt < 4; attempt++) {
+    let lastError;
+    for (let attempt = 0; attempt < 5; attempt++) {
       try {
+        job.message = attempt === 0
+          ? "در حال تشخیص گفتار و ساخت زیرنویس دری…"
+          : "سرویس ترجمه شلوغ است؛ تلاش دوباره " + attempt + " از ۴…";
+        job.updatedAt = Date.now();
         result = await ai.models.generateContent({
           model: "gemini-3.8-flash",
           contents: [createPartFromUri(remoteFile.uri, remoteFile.mimeType), prompt],
           config: { temperature: 0.2 }
         });
-        lastModelError = null;
+        lastError = null;
         break;
-      } catch (modelError) {
-        lastModelError = modelError;
-        const status = Number(modelError.status || modelError.code || 0);
-        const retryable = [429, 500, 502, 503, 504].includes(status);
-        if (!retryable || attempt === 3) throw modelError;
-        await new Promise(resolve => setTimeout(resolve, 2000 * (attempt + 1)));
+      } catch (error) {
+        lastError = error;
+        if (!isRetryable(error) || attempt === 4) throw error;
+        await sleep(Math.min(30000, 3000 * Math.pow(2, attempt)));
       }
     }
-    if (lastModelError || !result) throw lastModelError || new Error("پاسخی از Gemini دریافت نشد.");
+    if (lastError || !result) throw lastError || new Error("پاسخی از Gemini دریافت نشد.");
     const srt = srtClean(result.text);
     if (!srt || !/\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3}/.test(srt)) {
-      throw new Error("Gemini زیرنویس SRT معتبر تولید نکرد. لطفاً ویدیوی کوتاه‌تری آزمایش کنید.");
+      throw new Error("زیرنویس SRT معتبر از Gemini دریافت نشد.");
     }
-    res.json({ success: true, status: "translated", language: "دری افغانستان", srt });
+    job.status = "completed";
+    job.message = "زیرنویس دری آماده شد.";
+    job.srt = srt;
+    job.updatedAt = Date.now();
   } catch (error) {
-    console.error("Translation error:", error);
-    const status = Number(error.status || error.code || 0);
-    const httpStatus = [429, 500, 502, 503, 504].includes(status) ? 503 : 500;
-    const message = httpStatus === 503
-      ? "سرویس هوش مصنوعی فعلاً شلوغ است. چند دقیقه بعد دوباره تلاش کنید."
+    console.error("Translation job failed:", error);
+    const status = Number(error?.status || error?.code || error?.response?.status || 0);
+    job.status = "failed";
+    job.message = [429, 500, 502, 503, 504].includes(status)
+      ? "سرویس Gemini پس از چند تلاش هنوز پاسخ نداد. مشکل از دسترسی موقت سرویس هوش مصنوعی است؛ کمی بعد دوباره امتحان می‌کنیم."
       : (error.message || "در ترجمه ویدیو خطا رخ داد.");
-    res.status(httpStatus).json({ success: false, message });
+    job.updatedAt = Date.now();
   } finally {
-    if (tempPath) fs.promises.unlink(tempPath).catch(() => {});
+    await fs.promises.unlink(file.path).catch(() => {});
     if (remoteFile?.name && process.env.GEMINI_API_KEY) {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       ai.files.delete({ name: remoteFile.name }).catch(() => {});
     }
   }
+}
+
+app.post("/api/translate", upload.single("video"), (req, res) => {
+  if (!process.env.GEMINI_API_KEY) {
+    if (req.file?.path) fs.promises.unlink(req.file.path).catch(() => {});
+    return res.status(503).json({ success: false, message: "کلید Gemini در سرور تنظیم نشده است." });
+  }
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: "لطفاً فایل ویدیویی را انتخاب کنید. دریافت مستقیم لینک شبکه‌های اجتماعی هنوز فعال نیست." });
+  }
+  const id = crypto.randomUUID();
+  jobs.set(id, {
+    status: "processing",
+    message: "درخواست ثبت شد؛ پردازش ویدیو آغاز می‌شود.",
+    srt: null,
+    updatedAt: Date.now()
+  });
+  // Respond immediately; the browser polls the job endpoint instead of waiting for Gemini.
+  res.status(202).json({ success: true, jobId: id, status: "processing" });
+  processTranslation(id, req.file).catch(error => {
+    console.error("Unexpected job error:", error);
+    const job = jobs.get(id);
+    if (job) {
+      job.status = "failed";
+      job.message = "پردازش ویدیو به مشکل خورد. لطفاً بعداً دوباره تلاش کنید.";
+      job.updatedAt = Date.now();
+    }
+  });
+});
+
+app.get("/api/jobs/:id", (req, res) => {
+  const job = jobs.get(req.params.id);
+  if (!job) return res.status(404).json({ success: false, message: "درخواست پیدا نشد یا سرور دوباره راه‌اندازی شده است." });
+  res.json({
+    success: job.status !== "failed",
+    status: job.status,
+    message: job.message,
+    srt: job.status === "completed" ? job.srt : undefined
+  });
 });
 
 app.use((err, req, res, next) => {
