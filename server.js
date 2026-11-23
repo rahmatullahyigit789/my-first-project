@@ -48,7 +48,26 @@ function sleep(ms) {
 
 function isRetryable(error) {
   const status = Number(error?.status || error?.code || error?.response?.status || 0);
-  return [408, 429, 500, 502, 503, 504].includes(status);
+  const code = error?.code || error?.cause?.code || "";
+  return [408, 429, 500, 502, 503, 504].includes(status) ||
+    ["UND_ERR_HEADERS_TIMEOUT", "UND_ERR_CONNECT_TIMEOUT", "ECONNRESET", "ETIMEDOUT", "ECONNREFUSED"].includes(code);
+}
+
+async function uploadToGemini(ai, file) {
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await ai.files.upload({
+        file: file.path,
+        config: { mimeType: file.mimetype, displayName: file.originalname }
+      });
+    } catch (error) {
+      lastError = error;
+      if (!isRetryable(error) || attempt === 2) throw error;
+      await sleep(3000 * (attempt + 1));
+    }
+  }
+  throw lastError || new Error("بارگذاری ویدیو در Gemini ناموفق شد.");
 }
 
 function srtClean(value) {
@@ -68,10 +87,7 @@ async function processTranslation(jobId, file) {
     job.message = "ویدیو به سرویس هوش مصنوعی فرستاده شد؛ در حال آماده‌سازی فایل است.";
     job.updatedAt = Date.now();
 
-    remoteFile = await ai.files.upload({
-      file: file.path,
-      config: { mimeType: file.mimetype, displayName: file.originalname }
-    });
+    remoteFile = await uploadToGemini(ai, file);
 
     let status = remoteFile.state;
     for (let i = 0; i < 90 && status !== "ACTIVE"; i++) {
@@ -87,24 +103,29 @@ async function processTranslation(jobId, file) {
     const prompt = "گفتار ویدیوی پیوست را با حفظ ترتیب و زمان‌بندی به زبان دری افغانستان ترجمه کن. فقط زیرنویس SRT معتبر برگردان؛ هیچ توضیح اضافه نده. زمان‌ها را با قالب HH:MM:SS,mmm بنویس و با گفتار واقعی هماهنگ کن. اگر بخشی گفتار ندارد، برای آن زیرنویس نساز. زبان اصلی را خودت تشخیص بده.";
     let result;
     let lastError;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        job.message = attempt === 0
-          ? "در حال تشخیص گفتار و ساخت زیرنویس دری…"
-          : "سرویس ترجمه شلوغ است؛ تلاش دوباره " + attempt + " از ۴…";
-        job.updatedAt = Date.now();
-        result = await ai.models.generateContent({
-          model: "gemini-3.8-flash",
-          contents: [createPartFromUri(remoteFile.uri, remoteFile.mimeType), prompt],
-          config: { temperature: 0.2 }
-        });
-        lastError = null;
-        break;
-      } catch (error) {
-        lastError = error;
-        if (!isRetryable(error) || attempt === 4) throw error;
-        await sleep(Math.min(30000, 3000 * Math.pow(2, attempt)));
+    const models = ["gemini-3.8-flash", "gemini-3.5-flash-lite"];
+    for (const model of models) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          job.message = "در حال ساخت زیرنویس دری با " + model + "…";
+          job.updatedAt = Date.now();
+          result = await ai.models.generateContent({
+            model,
+            contents: [createPartFromUri(remoteFile.uri, remoteFile.mimeType), prompt],
+            config: { temperature: 0.2 }
+          });
+          lastError = null;
+          break;
+        } catch (error) {
+          lastError = error;
+          if (!isRetryable(error) || attempt === 2) break;
+          job.message = "سرویس ترجمه موقتاً شلوغ است؛ تلاش دوباره…";
+          job.updatedAt = Date.now();
+          await sleep(Math.min(20000, 3000 * Math.pow(2, attempt)));
+        }
       }
+      if (result) break;
+      // A busy primary model falls back to the lighter model before reporting failure.
     }
     if (lastError || !result) throw lastError || new Error("پاسخی از Gemini دریافت نشد.");
     const srt = srtClean(result.text);
