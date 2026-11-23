@@ -3,19 +3,18 @@ const cors = require("cors");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
+const { GoogleGenAI, createPartFromUri } = require("@google/genai");
 
 const app = express();
-const uploadDir = path.join(__dirname, "uploads");
-fs.mkdirSync(uploadDir, { recursive: true });
-
 const upload = multer({
-  dest: uploadDir,
+  dest: os.tmpdir(),
   limits: { fileSize: 1024 * 1024 * 1024 },
-  fileFilter: (req, file, callback) => {
+  fileFilter: (req, file, cb) => {
     if (!file.mimetype || !file.mimetype.startsWith("video/")) {
-      return callback(new Error("فقط فایل ویدیویی پذیرفته می‌شود."));
+      return cb(new Error("فقط فایل ویدیویی پذیرفته می‌شود."));
     }
-    callback(null, true);
+    cb(null, true);
   }
 });
 
@@ -23,66 +22,72 @@ app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "index.html"));
-});
+app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
+app.get("/api/health", (req, res) => res.json({
+  status: "ok",
+  geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+  translation: "video-to-dari-srt"
+}));
 
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", message: "Video Translator is running" });
-});
+function srtClean(value) {
+  return String(value || "").replace(/\x60{3}(?:srt)?/gi, "").trim();
+}
 
-// This endpoint safely receives a video file. Translation is a separate future step.
-app.post("/api/intake", upload.single("video"), (req, res) => {
-  if (req.file) {
-    return res.status(202).json({
-      success: true,
-      status: "received",
-      message: "ویدیو دریافت شد؛ موتور ترجمه هنوز وصل نشده است.",
-      file: { originalName: req.file.originalname, size: req.file.size }
-    });
-  }
-
-  const videoUrl = typeof req.body.videoUrl === "string" ? req.body.videoUrl.trim() : "";
-  if (!videoUrl) {
-    return res.status(400).json({ success: false, message: "لینک یا فایل ویدیو لازم است." });
-  }
-
-  let parsedUrl;
+app.post("/api/translate", upload.single("video"), async (req, res) => {
+  const tempPath = req.file?.path;
+  let remoteFile;
   try {
-    parsedUrl = new URL(videoUrl);
-  } catch {
-    return res.status(400).json({ success: false, message: "لینک ویدیو معتبر نیست." });
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(503).json({ success: false, message: "کلید Gemini در سرور تنظیم نشده است." });
+    }
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "لطفاً فایل ویدیویی را انتخاب کنید. دریافت مستقیم لینک شبکه‌های اجتماعی هنوز فعال نیست." });
+    }
+
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    remoteFile = await ai.files.upload({
+      file: tempPath,
+      config: { mimeType: req.file.mimetype, displayName: req.file.originalname }
+    });
+
+    let status = remoteFile.state;
+    for (let i = 0; i < 60 && status !== "ACTIVE"; i++) {
+      if (status === "FAILED") throw new Error("پردازش فایل ویدیویی توسط Gemini ناموفق شد.");
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      remoteFile = await ai.files.get({ name: remoteFile.name });
+      status = remoteFile.state;
+    }
+    if (status !== "ACTIVE") throw new Error("آماده‌سازی ویدیو بیش از حد طول کشید؛ دوباره تلاش کنید.");
+
+    const prompt = `گفتار ویدیوی پیوست را با حفظ ترتیب و زمان‌بندی به زبان دری افغانستان ترجمه کن. فقط زیرنویس SRT معتبر برگردان؛ هیچ توضیح اضافه نده. شماره هر قطعه، زمان شروع و پایان با قالب HH:MM:SS,mmm و متن طبیعی دری باشد. زمان‌ها باید با گفتار واقعی هماهنگ باشند. اگر بخشی گفتار ندارد، برای آن زیرنویس نساز. زبان اصلی را خودت تشخیص بده.`;
+    const result = await ai.models.generateContent({
+      model: "gemini-3.8-flash",
+      contents: [createPartFromUri(remoteFile.uri, remoteFile.mimeType), prompt],
+      config: { temperature: 0.2 }
+    });
+    const srt = srtClean(result.text);
+    if (!srt || !/\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3}/.test(srt)) {
+      throw new Error("Gemini زیرنویس SRT معتبر تولید نکرد. لطفاً ویدیوی کوتاه‌تری آزمایش کنید.");
+    }
+    res.json({ success: true, status: "translated", language: "دری افغانستان", srt });
+  } catch (error) {
+    console.error("Translation error:", error);
+    res.status(500).json({ success: false, message: error.message || "در ترجمه ویدیو خطا رخ داد." });
+  } finally {
+    if (tempPath) fs.promises.unlink(tempPath).catch(() => {});
+    if (remoteFile?.name && process.env.GEMINI_API_KEY) {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      ai.files.delete({ name: remoteFile.name }).catch(() => {});
+    }
   }
-
-  if (!["http:", "https:"].includes(parsedUrl.protocol)) {
-    return res.status(400).json({ success: false, message: "فقط لینک‌های HTTP یا HTTPS پذیرفته می‌شوند." });
-  }
-
-  return res.status(202).json({
-    success: true,
-    status: "link_received",
-    message: "لینک دریافت شد؛ دریافت خودکار از شبکه‌های اجتماعی هنوز فعال نشده است."
-  });
-});
-
-app.post("/api/translate", (req, res) => {
-  res.status(501).json({
-    success: false,
-    message: "موتور هوش مصنوعی ترجمه و دوبله هنوز تنظیم نشده است."
-  });
 });
 
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
     return res.status(413).json({ success: false, message: "اندازه فایل نباید بیشتر از ۱ گیگابایت باشد." });
   }
-  if (err) {
-    return res.status(400).json({ success: false, message: err.message || "در دریافت فایل خطا رخ داد." });
-  }
-  next();
+  res.status(400).json({ success: false, message: err.message || "در دریافت فایل خطا رخ داد." });
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on port ${PORT}`);
-});
+app.listen(PORT, "0.0.0.0", () => console.log(`Server running on port ${PORT}`));
