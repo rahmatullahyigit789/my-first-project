@@ -117,7 +117,7 @@
     const fileName = document.getElementById("fileName");
     const message = document.getElementById("message");
     const submitButton = form.querySelector('button[type="submit"]');
-    document.querySelectorAll('input[name="outputMode"]').forEach(input => input.addEventListener("change", () => { submitButton.textContent = input.value === "dub" ? "ساخت دوبله صوتی فارسی یا دری" : "ساخت زیرنویس دری"; }));
+    document.querySelectorAll('input[name="outputMode"]').forEach(input => input.addEventListener("change", () => { submitButton.textContent = input.value === "dub" ? "ساخت دوبله صوتی فارسی" : "ساخت زیرنویس دری"; }));
     const progressWrap = document.getElementById("progressWrap");
     const progressFill = document.getElementById("progressFill");
     const progressValue = document.getElementById("progressValue");
@@ -154,7 +154,7 @@
 
           const dubPanel = document.createElement("div");
           dubPanel.style.marginTop = "16px";
-          dubPanel.innerHTML = '<label for="dubLanguage">زبان دوبله</label><select id="dubLanguage"><option value="fa">فارسی</option><option value="ps">دری افغانستان</option></select><button type="button" id="makeDub">ساخت دوبله صوتی</button>';
+          dubPanel.innerHTML = '<button type="button" id="makeDub">ساخت دوبله صوتی فارسی</button>';
           message.appendChild(dubPanel);
           dubPanel.querySelector("#makeDub").addEventListener("click", async () => {
             const dubButton = dubPanel.querySelector("#makeDub");
@@ -164,7 +164,7 @@
               const dubResponse = await fetch("/api/dub", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ srt: result.srt, language: dubPanel.querySelector("#dubLanguage").value })
+                body: JSON.stringify({ srt: result.srt, language: "fa" })
               });
               const dubResult = await dubResponse.json();
               if (!dubResponse.ok || !dubResult.success) throw new Error(dubResult.message || "ساخت دوبله ناموفق شد.");
@@ -253,7 +253,7 @@
       } finally {
         activeJob = false;
         submitButton.disabled = false;
-        submitButton.textContent = document.querySelector('input[name="outputMode"]:checked')?.value === "dub" ? "ساخت دوبله صوتی فارسی یا دری" : "ساخت زیرنویس دری";
+        submitButton.textContent = document.querySelector('input[name="outputMode"]:checked')?.value === "dub" ? "ساخت دوبله صوتی فارسی" : "ساخت زیرنویس دری";
       }
     });
   </script>
