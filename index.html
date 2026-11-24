@@ -72,7 +72,7 @@
     <header>
       <div class="logo">🌐🎬</div>
       <div class="eyebrow">پروژهٔ ترجمان هوشمند ویدیو</div>
-      <h1>ویدیوی خود را به دری ترجمه کنید</h1>
+      <h1>ویدیوی خود را ترجمه و دانلود کنید</h1>
       <p>ویدیو را یک‌بار آپلود کن و زیرنویس یا دوبله صوتی را انتخاب کن.</p>
     </header>
 
@@ -164,7 +164,7 @@
               const dubResponse = await fetch("/api/dub", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ srt: result.srt, language: "fa" })
+                body: JSON.stringify({ srt: result.srt, language: "fa", jobId })
               });
               const dubResult = await dubResponse.json();
               if (!dubResponse.ok || !dubResult.success) throw new Error(dubResult.message || "ساخت دوبله ناموفق شد.");
@@ -176,6 +176,20 @@
               audioLink.style.marginTop = "12px";
               audioLink.style.color = "#69e5c5";
               dubPanel.appendChild(audioLink);
+              if (dubResult.videoUrl) {
+                const videoLink = document.createElement("a");
+                videoLink.href = dubResult.videoUrl;
+                videoLink.textContent = "دانلود ویدیوی نهایی دوبله‌شده (MP4)";
+                videoLink.download = "translated-video.mp4";
+                videoLink.style.display = "block";
+                videoLink.style.marginTop = "12px";
+                videoLink.style.color = "#69e5c5";
+                videoLink.style.fontWeight = "bold";
+                dubPanel.appendChild(videoLink);
+                showMessage("ویدیوی نهایی با صدای دوبلهٔ فارسی آمادهٔ دانلود است.", true);
+              } else {
+                showMessage(dubResult.message || "صدای دوبله آماده شد؛ ویدیوی نهایی ساخته نشد.");
+              }
               dubButton.textContent = "دوبله آماده شد";
             } catch (error) {
               let dubError = dubPanel.querySelector("#dubError");
@@ -198,7 +212,7 @@
           const link = document.createElement("a");
           link.href = downloadUrl;
           link.download = "subtitle-dari.srt";
-          link.textContent = "دانلود زیرنویس دری (SRT)";
+          link.textContent = "دانلود زیرنویس (SRT)";
           link.style.display = "inline-block";
           link.style.marginTop = "12px";
           link.style.color = "#69e5c5";
