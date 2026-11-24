@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#10182c">
-  <title>ترجمان ویدیو | زیرنویس دری</title>
+  <title>ترجمان ویدیو | زیرنویس و دوبله</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -77,7 +77,7 @@
     </header>
 
     <section class="panel">
-      <h2>ساخت زیرنویس دری</h2>
+      <h2>آپلود ویدیو و انتخاب خروجی</h2>
       <form id="translateForm">
         <label for="videoFile">فایل ویدیو را انتخاب کنید</label>
         <div class="upload">
@@ -87,7 +87,20 @@
         <p class="hint" id="fileName">حداکثر اندازهٔ فایل: ۱ گیگابایت. لینک مستقیم اینستاگرام و Threads هنوز فعال نشده است.</p>
         <button type="submit">ساخت زیرنویس دری</button>
       </form>
-      <div class="feature-note"><strong>قابلیت‌های مرحلهٔ بعد</strong><p>دریافت مستقیم لینک یوتیوب، اینستاگرام و فیسبوک و دوبلهٔ فارسی و دری هنوز به کد سرور وصل نشده‌اند؛ این گزینه‌ها را بعد از ساخت و آزمایش بخش پردازش فعال می‌کنیم.</p></div>
+      <div class="feature-note">
+        <strong>نوع خروجی را انتخاب کنید</strong>
+        <div class="grid" style="margin-top:12px">
+          <label style="margin:0;padding:14px;border:1px solid #69e5c5;border-radius:12px;background:#102a30">
+            <input type="radio" name="outputMode" value="subtitle" checked>
+            زیرنویس دری (فعال)
+          </label>
+          <label style="margin:0;padding:14px;border:1px solid #66809f;border-radius:12px;background:#101a2d">
+            <input type="radio" name="outputMode" value="dub" disabled>
+            دوبله فارسی و دری (به‌زودی)
+          </label>
+        </div>
+        <p>یک‌بار ویدیو را انتخاب کن؛ بعد نوع خروجی را تعیین کن. فعلاً ساخت و دانلود زیرنویس دری فعال است. دوبله و دریافت لینک یوتیوب، اینستاگرام و فیسبوک هنوز در سرور ساخته نشده‌اند.</p>
+      </div>
       <div id="message" role="status"></div>
       <div class="progress-wrap" id="progressWrap" aria-live="polite">
         <div class="progress-top"><span id="progressLabel">در حال آماده‌سازی…</span><strong id="progressValue">۰٪</strong></div>
