@@ -78,13 +78,19 @@
 
     <section class="panel">
       <h2>آپلود ویدیو و انتخاب خروجی</h2>
+      <form id="linkForm" style="margin-bottom:26px;padding-bottom:22px;border-bottom:1px solid #405372">
+        <label for="videoUrl">لینک ویدیو از شبکه‌های اجتماعی</label>
+        <input id="videoUrl" type="url" placeholder="لینک YouTube، Instagram، Facebook یا X" autocomplete="url">
+        <p class="hint">لینک باید عمومی و دریافت آن مجاز باشد. حداکثر اندازهٔ ویدیو ۱ گیگابایت.</p>
+        <button type="submit" id="linkSubmit">دریافت و ترجمه از لینک</button>
+      </form>
       <form id="translateForm">
         <label for="videoFile">فایل ویدیو را انتخاب کنید</label>
         <div class="upload">
           <strong>۱. انتخاب فایل ویدیو</strong>دکمهٔ سبزرنگ زیر را بزنید و ویدیو را از موبایل انتخاب کنید
           <input id="videoFile" type="file" accept="video/*" required>
         </div>
-        <p class="hint" id="fileName">حداکثر اندازهٔ فایل: ۱ گیگابایت. دریافت مستقیم لینک شبکه‌های اجتماعی هنوز فعال نیست.</p>
+        <p class="hint" id="fileName">حداکثر اندازهٔ فایل: ۱ گیگابایت. یا لینک ویدیوی عمومی را در کادر بالا وارد کنید.</p>
         <button type="submit">شروع ساخت خروجی انتخاب‌شده</button>
       </form>
       <div class="feature-note">
@@ -92,14 +98,14 @@
         <div class="grid" style="margin-top:12px">
           <label style="margin:0;padding:14px;border:1px solid #69e5c5;border-radius:12px;background:#102a30">
             <input type="radio" name="outputMode" value="subtitle" checked>
-            زیرنویس دری (فعال)
+            زیرنویس فارسی (فعال)
           </label>
           <label style="margin:0;padding:14px;border:1px solid #66809f;border-radius:12px;background:#101a2d">
             <input type="radio" name="outputMode" value="dub">
-            دوبله صوتی فارسی یا دری
+            دوبله صوتی فارسی
           </label>
         </div>
-        <p>یک‌بار ویدیو را انتخاب کن؛ بعد نوع خروجی را تعیین کن. برای زیرنویس، فایل SRT می‌گیری. برای دوبله، پس از آماده‌شدن متن زیرنویس، فایل صوتی WAV ساخته می‌شود. دریافت لینک شبکه‌های اجتماعی هنوز فعال نیست.</p>
+        <p>یک‌بار ویدیو را انتخاب کن؛ بعد نوع خروجی را تعیین کن. برای زیرنویس، فایل SRT می‌گیری. برای دوبله، پس از آماده‌شدن متن زیرنویس، فایل صوتی WAV ساخته می‌شود. </p>
       </div>
       <div id="message" role="status"></div>
       <div class="progress-wrap" id="progressWrap" aria-live="polite">
@@ -108,11 +114,14 @@
         <div class="progress-caption">درصد آپلود و مرحله‌های پردازش سرور</div>
       </div>
     </section>
-    <footer>دوبله صوتی با Gemini در کد پیاده‌سازی شده؛ دریافت مستقیم لینک شبکه‌های اجتماعی هنوز در دست ساخت است.</footer>
+    <footer>دانلود لینک با yt-dlp؛ ترجمه و دوبله با هوش مصنوعی.</footer>
   </main>
 
   <script>
     const form = document.getElementById("translateForm");
+    const linkForm = document.getElementById("linkForm");
+    const linkInput = document.getElementById("videoUrl");
+    const linkSubmit = document.getElementById("linkSubmit");
     const fileInput = document.getElementById("videoFile");
     const fileName = document.getElementById("fileName");
     const message = document.getElementById("message");
@@ -149,8 +158,9 @@
         const result = await response.json();
         if (!response.ok) throw new Error(result.message || "وضعیت پردازش دریافت نشد.");
         if (result.status === "completed") {
+          if (result.sourceUrl) { const originalLink = document.createElement("a"); originalLink.href = "/api/jobs/" + encodeURIComponent(jobId) + "/original"; originalLink.textContent = "دانلود ویدیوی اصلی"; originalLink.download = "original-video.mp4"; originalLink.style.display = "block"; originalLink.style.marginTop = "12px"; originalLink.style.color = "#69e5c5"; message.appendChild(originalLink); }
           setProgress(100, "ترجمه تکمیل شد");
-          showMessage(result.message || "زیرنویس دری آماده شد.", true);
+          showMessage(result.message || "زیرنویس فارسی آماده شد.", true);
 
           const dubPanel = document.createElement("div");
           dubPanel.style.marginTop = "16px";
@@ -211,8 +221,8 @@
           const downloadUrl = URL.createObjectURL(blob);
           const link = document.createElement("a");
           link.href = downloadUrl;
-          link.download = "subtitle-dari.srt";
-          link.textContent = "دانلود زیرنویس (SRT)";
+          link.download = "subtitle-persian.srt";
+          link.textContent = "دانلود زیرنویس فارسی (SRT)";
           link.style.display = "inline-block";
           link.style.marginTop = "12px";
           link.style.color = "#69e5c5";
@@ -226,6 +236,22 @@
         showMessage(result.message || "در حال پردازش ویدیو…");
       }
     }
+
+    linkForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      const url = linkInput.value.trim();
+      if (!url) return showMessage("لطفاً لینک ویدیو را وارد کنید.");
+      if (activeJob) return;
+      activeJob = true; linkSubmit.disabled = true; linkSubmit.textContent = "در حال دریافت ویدیو…";
+      setProgress(3, "در حال ثبت لینک…"); showMessage("لینک در حال بررسی و دریافت ویدیو است.");
+      try {
+        const response = await fetch("/api/translate-url", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+        const result = await response.json();
+        if (!response.ok || !result.success || !result.jobId) throw new Error(result.message || "ثبت لینک ناموفق شد.");
+        await pollJob(result.jobId);
+      } catch (error) { setProgress(0, "دریافت متوقف شد"); showMessage("خطا: " + (error.message || "دریافت ویدیو ناموفق شد.")); }
+      finally { activeJob = false; linkSubmit.disabled = false; linkSubmit.textContent = "دریافت و ترجمه از لینک"; }
+    });
 
     form.addEventListener("submit", async event => {
       event.preventDefault();
@@ -259,7 +285,7 @@
         if (!result.success || !result.jobId) throw new Error(result.message || "درخواست ترجمه ثبت نشد.");
         submitButton.textContent = "ترجمه در جریان است…";
         setProgress(35, "ویدیو ارسال شد؛ آماده‌سازی برای ترجمه…");
-        showMessage("درخواست ثبت شد. اکنون زیرنویس دری در پس‌زمینه ساخته می‌شود.");
+        showMessage("درخواست ثبت شد. اکنون زیرنویس فارسی در پس‌زمینه ساخته می‌شود.");
         await pollJob(result.jobId);
       } catch (error) {
         setProgress(0, "پردازش متوقف شد");
