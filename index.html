@@ -150,6 +150,38 @@
         if (result.status === "completed") {
           setProgress(100, "ترجمه تکمیل شد");
           showMessage(result.message || "زیرنویس دری آماده شد.", true);
+
+          const dubPanel = document.createElement("div");
+          dubPanel.style.marginTop = "16px";
+          dubPanel.innerHTML = '<label for="dubLanguage">زبان دوبله</label><select id="dubLanguage"><option value="fa">فارسی</option><option value="ps">دری افغانستان</option></select><button type="button" id="makeDub">ساخت دوبله صوتی</button>';
+          message.appendChild(dubPanel);
+          dubPanel.querySelector("#makeDub").addEventListener("click", async () => {
+            const dubButton = dubPanel.querySelector("#makeDub");
+            dubButton.disabled = true;
+            dubButton.textContent = "در حال ساخت دوبله…";
+            try {
+              const dubResponse = await fetch("/api/dub", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ srt: result.srt, language: dubPanel.querySelector("#dubLanguage").value })
+              });
+              const dubResult = await dubResponse.json();
+              if (!dubResponse.ok || !dubResult.success) throw new Error(dubResult.message || "ساخت دوبله ناموفق شد.");
+              const audioLink = document.createElement("a");
+              audioLink.href = dubResult.audioUrl;
+              audioLink.textContent = "دانلود دوبله صوتی (WAV)";
+              audioLink.download = "video-dub.wav";
+              audioLink.style.display = "block";
+              audioLink.style.marginTop = "12px";
+              audioLink.style.color = "#69e5c5";
+              dubPanel.appendChild(audioLink);
+              dubButton.textContent = "دوبله آماده شد";
+            } catch (error) {
+              showMessage("خطای دوبله: " + error.message);
+              dubButton.disabled = false;
+              dubButton.textContent = "تلاش دوباره برای دوبله";
+            }
+          });
           const blob = new Blob([result.srt], { type: "text/plain;charset=utf-8" });
           const downloadUrl = URL.createObjectURL(blob);
           const link = document.createElement("a");
