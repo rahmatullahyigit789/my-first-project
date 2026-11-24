@@ -183,6 +183,9 @@
               dubButton.textContent = "تلاش دوباره برای دوبله";
             }
           });
+          if (document.querySelector('input[name="outputMode"]:checked')?.value === "dub") {
+            dubPanel.querySelector("#makeDub").click();
+          }
           const blob = new Blob([result.srt], { type: "text/plain;charset=utf-8" });
           const downloadUrl = URL.createObjectURL(blob);
           const link = document.createElement("a");
