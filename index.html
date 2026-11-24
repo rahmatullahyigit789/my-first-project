@@ -36,7 +36,11 @@
       border-radius: 12px; text-align: center; background: #101a2d;
       color: #cbd7e9; cursor: pointer; line-height: 1.9;
     }
-    input[type="file"] { max-width: 100%; margin-top: 12px; }
+    input[type="file"] { display:block; width:100%; max-width:100%; margin-top:14px; padding:12px; border:1px solid #69e5c5; border-radius:12px; background:#172943; color:#fff; font:inherit; cursor:pointer; }
+    input[type="file"]::file-selector-button { margin:0 0 0 12px; padding:12px 18px; border:0; border-radius:9px; background:#69e5c5; color:#0d1b2a; font:bold 15px Tahoma,Arial,sans-serif; cursor:pointer; }
+    .upload strong { display:block; color:#69e5c5; font-size:18px; margin-bottom:5px; }
+    .feature-note { margin-top:18px; padding:14px; border:1px solid #405372; border-radius:12px; background:#101a2d; }
+    .feature-note strong { color:#69e5c5; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
     button {
       width: 100%; margin-top: 24px; padding: 15px; border: 0;
@@ -77,12 +81,13 @@
       <form id="translateForm">
         <label for="videoFile">فایل ویدیو را انتخاب کنید</label>
         <div class="upload">
-          ویدیوی کوتاه انتخاب کنید
+          <strong>۱. انتخاب فایل ویدیو</strong>دکمهٔ سبزرنگ زیر را بزنید و ویدیو را از موبایل انتخاب کنید
           <input id="videoFile" type="file" accept="video/*" required>
         </div>
         <p class="hint" id="fileName">حداکثر اندازهٔ فایل: ۱ گیگابایت. لینک مستقیم اینستاگرام و Threads هنوز فعال نشده است.</p>
         <button type="submit">ساخت زیرنویس دری</button>
       </form>
+      <div class="feature-note"><strong>قابلیت‌های مرحلهٔ بعد</strong><p>دریافت مستقیم لینک یوتیوب، اینستاگرام و فیسبوک و دوبلهٔ فارسی و دری هنوز به کد سرور وصل نشده‌اند؛ این گزینه‌ها را بعد از ساخت و آزمایش بخش پردازش فعال می‌کنیم.</p></div>
       <div id="message" role="status"></div>
       <div class="progress-wrap" id="progressWrap" aria-live="polite">
         <div class="progress-top"><span id="progressLabel">در حال آماده‌سازی…</span><strong id="progressValue">۰٪</strong></div>
