@@ -86,7 +86,7 @@ async function processTranslation(jobId, file) {
   let remoteFile;
   try {
     if (!process.env.GEMINI_API_KEY) throw new Error("کلید Gemini در سرور تنظیم نشده است.");
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY, httpOptions: { apiVersion: "v1beta" } });
     job.message = "ویدیو به سرویس هوش مصنوعی فرستاده شد؛ در حال آماده‌سازی فایل است.";
     job.progress = 35;
     job.updatedAt = Date.now();
