@@ -194,7 +194,10 @@ async function downloadAndTranslate(jobId, url) {
   } catch (error) {
     console.error("Social video download failed:", error);
     const current = jobs.get(jobId);
-    if (current && current.status !== "completed") { current.status = "failed"; current.progress = 0; current.message = error.message || "دریافت ویدیو ناموفق شد."; current.updatedAt = Date.now(); }
+    if (current && current.status !== "completed") { current.status = "failed"; current.progress = 0; const detail = String(error?.stderr || error?.message || "");
+      current.message = /Sign in to confirm|not a bot|cookies/i.test(detail)
+        ? "یوتیوب دانلود از سرور را متوقف کرده و تأیید ورود می‌خواهد. این لینک از داخل سرور قابل دریافت نیست. اگر حق استفاده از ویدیو را دارید، فایل ویدیو را از دستگاه خود انتخاب و در بخش آپلود بفرستید؛ رمز یا کوکی حساب گوگل را ارسال نکنید."
+        : (error.message || "دریافت ویدیو ناموفق شد."); current.updatedAt = Date.now(); }
     const names = await fs.promises.readdir(os.tmpdir()).catch(() => []);
     for (const name of names.filter(n => n.startsWith("social-" + jobId + "."))) await fs.promises.unlink(path.join(os.tmpdir(), name)).catch(() => {});
   }
