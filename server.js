@@ -85,6 +85,7 @@ async function processTranslation(jobId, file) {
     if (!process.env.GEMINI_API_KEY) throw new Error("کلید Gemini در سرور تنظیم نشده است.");
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     job.message = "ویدیو به سرویس هوش مصنوعی فرستاده شد؛ در حال آماده‌سازی فایل است.";
+    job.progress = 35;
     job.updatedAt = Date.now();
 
     remoteFile = await uploadToGemini(ai, file);
@@ -96,6 +97,7 @@ async function processTranslation(jobId, file) {
       remoteFile = await ai.files.get({ name: remoteFile.name });
       status = remoteFile.state;
       job.message = "در حال آماده‌سازی ویدیو برای ترجمه…";
+      job.progress = Math.min(55, 40 + Math.floor((i + 1) / 90 * 15));
       job.updatedAt = Date.now();
     }
     if (status !== "ACTIVE") throw new Error("آماده‌سازی ویدیو بیش از سه دقیقه طول کشید.");
@@ -108,6 +110,7 @@ async function processTranslation(jobId, file) {
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           job.message = "در حال ساخت زیرنویس دری با " + model + "…";
+          job.progress = 65;
           job.updatedAt = Date.now();
           result = await ai.models.generateContent({
             model,
@@ -120,6 +123,7 @@ async function processTranslation(jobId, file) {
           lastError = error;
           if (!isRetryable(error) || attempt === 2) break;
           job.message = "سرویس ترجمه موقتاً شلوغ است؛ تلاش دوباره…";
+          job.progress = 70;
           job.updatedAt = Date.now();
           await sleep(Math.min(20000, 3000 * Math.pow(2, attempt)));
         }
@@ -133,6 +137,7 @@ async function processTranslation(jobId, file) {
       throw new Error("زیرنویس SRT معتبر از Gemini دریافت نشد.");
     }
     job.status = "completed";
+    job.progress = 100;
     job.message = "زیرنویس دری آماده شد.";
     job.srt = srt;
     job.updatedAt = Date.now();
@@ -140,6 +145,7 @@ async function processTranslation(jobId, file) {
     console.error("Translation job failed:", error);
     const status = Number(error?.status || error?.code || error?.response?.status || 0);
     job.status = "failed";
+    job.progress = 0;
     job.message = [429, 500, 502, 503, 504].includes(status)
       ? "سرویس Gemini پس از چند تلاش هنوز پاسخ نداد. مشکل از دسترسی موقت سرویس هوش مصنوعی است؛ کمی بعد دوباره امتحان می‌کنیم."
       : (error.message || "در ترجمه ویدیو خطا رخ داد.");
@@ -165,6 +171,7 @@ app.post("/api/translate", upload.single("video"), (req, res) => {
   jobs.set(id, {
     status: "processing",
     message: "درخواست ثبت شد؛ پردازش ویدیو آغاز می‌شود.",
+    progress: 10,
     srt: null,
     updatedAt: Date.now()
   });
@@ -187,6 +194,7 @@ app.get("/api/jobs/:id", (req, res) => {
   res.json({
     success: job.status !== "failed",
     status: job.status,
+    progress: job.status === "completed" ? 100 : (job.progress || 0),
     message: job.message,
     srt: job.status === "completed" ? job.srt : undefined
   });
