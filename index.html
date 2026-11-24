@@ -73,7 +73,7 @@
       <div class="logo">🌐🎬</div>
       <div class="eyebrow">پروژهٔ ترجمان هوشمند ویدیو</div>
       <h1>ویدیوی خود را به دری ترجمه کنید</h1>
-      <p>فعلاً فایل ویدیو را می‌گیرد و زیرنویس دری با فرمت SRT می‌سازد.</p>
+      <p>ویدیو را یک‌بار آپلود کن و زیرنویس یا دوبله صوتی را انتخاب کن.</p>
     </header>
 
     <section class="panel">
@@ -84,8 +84,8 @@
           <strong>۱. انتخاب فایل ویدیو</strong>دکمهٔ سبزرنگ زیر را بزنید و ویدیو را از موبایل انتخاب کنید
           <input id="videoFile" type="file" accept="video/*" required>
         </div>
-        <p class="hint" id="fileName">حداکثر اندازهٔ فایل: ۱ گیگابایت. لینک مستقیم اینستاگرام و Threads هنوز فعال نشده است.</p>
-        <button type="submit">ساخت زیرنویس دری</button>
+        <p class="hint" id="fileName">حداکثر اندازهٔ فایل: ۱ گیگابایت. دریافت مستقیم لینک شبکه‌های اجتماعی هنوز فعال نیست.</p>
+        <button type="submit">شروع ساخت خروجی انتخاب‌شده</button>
       </form>
       <div class="feature-note">
         <strong>نوع خروجی را انتخاب کنید</strong>
@@ -95,11 +95,11 @@
             زیرنویس دری (فعال)
           </label>
           <label style="margin:0;padding:14px;border:1px solid #66809f;border-radius:12px;background:#101a2d">
-            <input type="radio" name="outputMode" value="dub" disabled>
-            دوبله فارسی و دری (به‌زودی)
+            <input type="radio" name="outputMode" value="dub">
+            دوبله صوتی فارسی یا دری
           </label>
         </div>
-        <p>یک‌بار ویدیو را انتخاب کن؛ بعد نوع خروجی را تعیین کن. فعلاً ساخت و دانلود زیرنویس دری فعال است. دوبله و دریافت لینک یوتیوب، اینستاگرام و فیسبوک هنوز در سرور ساخته نشده‌اند.</p>
+        <p>یک‌بار ویدیو را انتخاب کن؛ بعد نوع خروجی را تعیین کن. برای زیرنویس، فایل SRT می‌گیری. برای دوبله، پس از آماده‌شدن متن زیرنویس، فایل صوتی WAV ساخته می‌شود. دریافت لینک شبکه‌های اجتماعی هنوز فعال نیست.</p>
       </div>
       <div id="message" role="status"></div>
       <div class="progress-wrap" id="progressWrap" aria-live="polite">
@@ -108,7 +108,7 @@
         <div class="progress-caption">درصد آپلود و مرحله‌های پردازش سرور</div>
       </div>
     </section>
-    <footer>دوبله و دریافت مستقیم لینک شبکه‌های اجتماعی هنوز در دست ساخت است.</footer>
+    <footer>دوبله صوتی با Gemini در کد پیاده‌سازی شده؛ دریافت مستقیم لینک شبکه‌های اجتماعی هنوز در دست ساخت است.</footer>
   </main>
 
   <script>
@@ -117,6 +117,7 @@
     const fileName = document.getElementById("fileName");
     const message = document.getElementById("message");
     const submitButton = form.querySelector('button[type="submit"]');
+    document.querySelectorAll('input[name="outputMode"]').forEach(input => input.addEventListener("change", () => { submitButton.textContent = input.value === "dub" ? "ساخت دوبله صوتی فارسی یا دری" : "ساخت زیرنویس دری"; }));
     const progressWrap = document.getElementById("progressWrap");
     const progressFill = document.getElementById("progressFill");
     const progressValue = document.getElementById("progressValue");
@@ -242,7 +243,7 @@
       } finally {
         activeJob = false;
         submitButton.disabled = false;
-        submitButton.textContent = "ساخت زیرنویس دری";
+        submitButton.textContent = document.querySelector('input[name="outputMode"]:checked')?.value === "dub" ? "ساخت دوبله صوتی فارسی یا دری" : "ساخت زیرنویس دری";
       }
     });
   </script>
