@@ -7,7 +7,8 @@ const os = require("os");
 const crypto = require("crypto");
 const { spawn } = require("child_process");
 const ffmpegPath = require("ffmpeg-static");
-const youtubedl = require("youtube-dl-exec");
+const youtubeDlPackage = require("youtube-dl-exec");
+const youtubedl = youtubeDlPackage;
 const { GoogleGenAI, createPartFromUri } = require("@google/genai");
 
 const app = express();
@@ -348,4 +349,18 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, "0.0.0.0", () => console.log(`Server running on port ${PORT}`));
+
+// Refresh the bundled yt-dlp executable at startup so deployments do not
+// keep using a stale extractor. A refresh failure must not take the API offline.
+async function refreshYoutubeDl() {
+  try {
+    await youtubeDlPackage.update();
+    console.log("yt-dlp executable refreshed from the official release channel.");
+  } catch (error) {
+    console.error("Could not refresh yt-dlp; continuing with bundled executable:", error?.message || error);
+  }
+}
+
+refreshYoutubeDl().finally(() => {
+  app.listen(PORT, "0.0.0.0", () => console.log(`Server running on port ${PORT}`));
+});
