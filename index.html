@@ -48,7 +48,12 @@
       display: none; margin-top: 18px; padding: 14px;
       border-radius: 10px; background: #332b1b; color: #ffe2a1; line-height: 1.9;
     }
-    .hint { font-size: 13px; color: #91a3bf; }
+    .progress-wrap { display:none; margin-top:18px; padding:15px; border:1px solid #405372; border-radius:12px; background:#101a2d; }
+    .progress-top { display:flex; justify-content:space-between; gap:12px; margin-bottom:10px; color:#dce8f7; font-size:14px; }
+    .progress-track { height:12px; overflow:hidden; border-radius:99px; background:#263650; }
+    .progress-fill { width:0%; height:100%; border-radius:inherit; background:linear-gradient(90deg,#35b8ee,#69e5c5); transition:width .35s ease; }
+    .progress-caption { margin-top:9px; color:#91a3bf; font-size:12px; }
+    .hint { font-size:13px; color:#91a3bf; }
     footer { text-align: center; color: #91a3bf; font-size: 13px; margin: 22px 0; }
     @media (max-width: 560px) {
       body { padding: 14px; }
@@ -79,6 +84,11 @@
         <button type="submit">ساخت زیرنویس دری</button>
       </form>
       <div id="message" role="status"></div>
+      <div class="progress-wrap" id="progressWrap" aria-live="polite">
+        <div class="progress-top"><span id="progressLabel">در حال آماده‌سازی…</span><strong id="progressValue">۰٪</strong></div>
+        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+        <div class="progress-caption">درصد آپلود و مرحله‌های پردازش سرور</div>
+      </div>
     </section>
     <footer>دوبله و دریافت مستقیم لینک شبکه‌های اجتماعی هنوز در دست ساخت است.</footer>
   </main>
@@ -89,7 +99,18 @@
     const fileName = document.getElementById("fileName");
     const message = document.getElementById("message");
     const submitButton = form.querySelector('button[type="submit"]');
+    const progressWrap = document.getElementById("progressWrap");
+    const progressFill = document.getElementById("progressFill");
+    const progressValue = document.getElementById("progressValue");
+    const progressLabel = document.getElementById("progressLabel");
     let activeJob = false;
+    function setProgress(value, label) {
+      const percent = Math.max(0, Math.min(100, Number(value) || 0));
+      progressWrap.style.display = "block";
+      progressFill.style.width = percent + "%";
+      progressValue.textContent = Math.round(percent).toLocaleString("fa-AF") + "٪";
+      if (label) progressLabel.textContent = label;
+    }
 
     fileInput.addEventListener("change", () => {
       const file = fileInput.files[0];
@@ -109,6 +130,7 @@
         const result = await response.json();
         if (!response.ok) throw new Error(result.message || "وضعیت پردازش دریافت نشد.");
         if (result.status === "completed") {
+          setProgress(100, "ترجمه تکمیل شد");
           showMessage(result.message || "زیرنویس دری آماده شد.", true);
           const blob = new Blob([result.srt], { type: "text/plain;charset=utf-8" });
           const downloadUrl = URL.createObjectURL(blob);
@@ -125,6 +147,7 @@
           return;
         }
         if (result.status === "failed") throw new Error(result.message || "ترجمه انجام نشد.");
+        setProgress(result.progress || 0, result.message || "در حال پردازش…");
         showMessage(result.message || "در حال پردازش ویدیو…");
       }
     }
@@ -138,17 +161,33 @@
       activeJob = true;
       submitButton.disabled = true;
       submitButton.textContent = "در حال ارسال ویدیو…";
-      showMessage("ویدیو در حال ارسال به سرور است؛ پس از ثبت درخواست، وضعیت ترجمه نمایش داده می‌شود.");
+      setProgress(0, "در حال ارسال ویدیو…");
+      showMessage("ویدیو در حال ارسال به سرور است؛ پیشرفت آپلود نمایش داده می‌شود.");
       try {
         const payload = new FormData();
         payload.append("video", file);
-        const response = await fetch("/api/translate", { method: "POST", body: payload });
-        const result = await response.json();
+        const result = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", "/api/translate");
+          xhr.upload.addEventListener("progress", event => {
+            if (event.lengthComputable) setProgress((event.loaded / event.total) * 30, "در حال آپلود ویدیو…");
+          });
+          xhr.addEventListener("load", () => {
+            let data;
+            try { data = JSON.parse(xhr.responseText); } catch { return reject(new Error("پاسخ سرور قابل خواندن نیست.")); }
+            if (xhr.status < 200 || xhr.status >= 300) return reject(new Error(data.message || "ارسال ویدیو ناموفق شد."));
+            resolve(data);
+          });
+          xhr.addEventListener("error", () => reject(new Error("ارتباط با سرور برقرار نشد.")));
+          xhr.send(payload);
+        });
         if (!response.ok || !result.success || !result.jobId) throw new Error(result.message || "درخواست ترجمه ثبت نشد.");
         submitButton.textContent = "ترجمه در جریان است…";
+        setProgress(35, "ویدیو ارسال شد؛ آماده‌سازی برای ترجمه…");
         showMessage("درخواست ثبت شد. اکنون زیرنویس دری در پس‌زمینه ساخته می‌شود.");
         await pollJob(result.jobId);
       } catch (error) {
+        setProgress(0, "پردازش متوقف شد");
         showMessage("خطا: " + (error.message || "ارتباط با سرور برقرار نشد."));
       } finally {
         activeJob = false;
