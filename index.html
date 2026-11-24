@@ -178,7 +178,14 @@
               dubPanel.appendChild(audioLink);
               dubButton.textContent = "دوبله آماده شد";
             } catch (error) {
-              showMessage("خطای دوبله: " + error.message);
+              let dubError = dubPanel.querySelector("#dubError");
+              if (!dubError) {
+                dubError = document.createElement("p");
+                dubError.id = "dubError";
+                dubError.style.color = "#ffcf91";
+                dubPanel.appendChild(dubError);
+              }
+              dubError.textContent = "خطای دوبله: " + (error.message || "ساخت صدا ناموفق شد.");
               dubButton.disabled = false;
               dubButton.textContent = "تلاش دوباره برای دوبله";
             }
