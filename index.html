@@ -181,7 +181,7 @@
           xhr.addEventListener("error", () => reject(new Error("ارتباط با سرور برقرار نشد.")));
           xhr.send(payload);
         });
-        if (!response.ok || !result.success || !result.jobId) throw new Error(result.message || "درخواست ترجمه ثبت نشد.");
+        if (!result.success || !result.jobId) throw new Error(result.message || "درخواست ترجمه ثبت نشد.");
         submitButton.textContent = "ترجمه در جریان است…";
         setProgress(35, "ویدیو ارسال شد؛ آماده‌سازی برای ترجمه…");
         showMessage("درخواست ثبت شد. اکنون زیرنویس دری در پس‌زمینه ساخته می‌شود.");
