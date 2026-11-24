@@ -37,7 +37,10 @@ const JOB_TTL_MS = 60 * 60 * 1000;
 function cleanupJobs() {
   const cutoff = Date.now() - JOB_TTL_MS;
   for (const [id, job] of jobs) {
-    if (job.updatedAt < cutoff && job.status !== "processing") jobs.delete(id);
+    if (job.updatedAt < cutoff && job.status !== "processing") {
+      jobs.delete(id);
+      if (job.audioPath) fs.promises.unlink(job.audioPath).catch(() => {});
+    }
   }
 }
 setInterval(cleanupJobs, 10 * 60 * 1000).unref();
@@ -219,7 +222,11 @@ app.post("/api/dub", async (req, res) => {
     if (!audioBase64) throw new Error("فایل صوتی از Gemini دریافت نشد.");
     const id = crypto.randomUUID();
     const audioPath = path.join(os.tmpdir(), "dub-" + id + ".wav");
-    await fs.promises.writeFile(audioPath, Buffer.from(audioBase64, "base64"));
+    const audioBuffer = Buffer.from(audioBase64, "base64");
+    if (audioBuffer.length < 44 || audioBuffer.toString("ascii", 0, 4) !== "RIFF" || audioBuffer.toString("ascii", 8, 12) !== "WAVE") {
+      throw new Error("خروجی صوتی Gemini فایل WAV معتبر نیست؛ دوباره تلاش کنید.");
+    }
+    await fs.promises.writeFile(audioPath, audioBuffer);
     jobs.set("dub-" + id, { status: "completed", audioPath, updatedAt: Date.now() });
     res.json({ success: true, audioUrl: "/api/dubs/" + id + "/audio", message: "فایل دوبله آماده شد." });
   } catch (error) {
