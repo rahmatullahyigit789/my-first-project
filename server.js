@@ -188,6 +188,54 @@ app.post("/api/translate", upload.single("video"), (req, res) => {
   });
 });
 
+
+app.post("/api/dub", async (req, res) => {
+  try {
+    const srt = String(req.body?.srt || "").slice(0, 12000);
+    const language = req.body?.language === "fa" ? "فارسی معیار" : "دری افغانستان";
+    if (!srt.trim()) return res.status(400).json({ success: false, message: "اول زیرنویس را تولید کنید." });
+    if (!process.env.GEMINI_API_KEY) return res.status(503).json({ success: false, message: "کلید Gemini تنظیم نشده است." });
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const plainText = srt
+      .replace(/^\s*\d+\s*$/gm, "")
+      .replace(/^\s*\d{2}:\d{2}:\d{2},\d{3}\s*-->.*$/gm, "")
+      .replace(/\r/g, "")
+      .split("\n").map(line => line.trim()).filter(Boolean).join(" ");
+    if (!plainText) return res.status(400).json({ success: false, message: "متن زیرنویس خالی است." });
+    const translated = await ai.models.generateContent({
+      model: "gemini-3.8-flash",
+      contents: "این متن زیرنویس را به " + language + " روان و طبیعی ترجمه کن. فقط متن ترجمه‌شده را برگردان، بدون توضیح و بدون زمان‌بندی:\n\n" + plainText,
+      config: { temperature: 0.2 }
+    });
+    const speechText = String(translated.text || "").trim();
+    if (!speechText) throw new Error("ترجمه برای دوبله تولید نشد.");
+    const speech = await ai.interactions.create({
+      model: "gemini-3.8-flash-tts",
+      input: [{ type: "user_input", content: [{ type: "text", text: speechText }] }],
+      response_format: { type: "audio" },
+      generation_config: { speech_config: [{ voice: "Kore" }] }
+    });
+    const audioBase64 = speech.output_audio?.data;
+    if (!audioBase64) throw new Error("فایل صوتی از Gemini دریافت نشد.");
+    const id = crypto.randomUUID();
+    const audioPath = path.join(os.tmpdir(), "dub-" + id + ".wav");
+    await fs.promises.writeFile(audioPath, Buffer.from(audioBase64, "base64"));
+    jobs.set("dub-" + id, { status: "completed", audioPath, updatedAt: Date.now() });
+    res.json({ success: true, audioUrl: "/api/dubs/" + id + "/audio", message: "فایل دوبله آماده شد." });
+  } catch (error) {
+    console.error("Dubbing failed:", error);
+    res.status(502).json({ success: false, message: error.message || "ساخت دوبله ناموفق شد." });
+  }
+});
+
+app.get("/api/dubs/:id/audio", async (req, res) => {
+  const job = jobs.get("dub-" + req.params.id);
+  if (!job?.audioPath) return res.status(404).json({ success: false, message: "فایل دوبله پیدا نشد." });
+  res.setHeader("Content-Type", "audio/wav");
+  res.setHeader("Content-Disposition", 'attachment; filename="video-dub.wav"');
+  res.sendFile(job.audioPath);
+});
+
 app.get("/api/jobs/:id", (req, res) => {
   const job = jobs.get(req.params.id);
   if (!job) return res.status(404).json({ success: false, message: "درخواست پیدا نشد یا سرور دوباره راه‌اندازی شده است." });
