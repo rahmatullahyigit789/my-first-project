@@ -7,6 +7,7 @@ const os = require("os");
 const crypto = require("crypto");
 const { spawn } = require("child_process");
 const ffmpegPath = require("ffmpeg-static");
+const youtubedl = require("youtube-dl-exec");
 const { GoogleGenAI, createPartFromUri } = require("@google/genai");
 
 const app = express();
@@ -29,7 +30,7 @@ app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 app.get("/api/health", (req, res) => res.json({
   status: "ok",
   geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
-  translation: "async-video-to-dari-srt"
+  translation: "async-video-to-persian-srt", linkDownloader: true
 }));
 
 // Jobs live in memory for this single Railway replica. A restart clears active jobs.
@@ -109,14 +110,14 @@ async function processTranslation(jobId, file) {
     }
     if (status !== "ACTIVE") throw new Error("آماده‌سازی ویدیو بیش از سه دقیقه طول کشید.");
 
-    const prompt = "گفتار ویدیوی پیوست را با حفظ ترتیب و زمان‌بندی به زبان دری افغانستان ترجمه کن. فقط زیرنویس SRT معتبر برگردان؛ هیچ توضیح اضافه نده. زمان‌ها را با قالب HH:MM:SS,mmm بنویس و با گفتار واقعی هماهنگ کن. اگر بخشی گفتار ندارد، برای آن زیرنویس نساز. زبان اصلی را خودت تشخیص بده.";
+    const prompt = "گفتار ویدیوی پیوست را با حفظ ترتیب و زمان‌بندی به فارسی روان و معیار ترجمه کن. فقط زیرنویس SRT معتبر برگردان؛ هیچ توضیح اضافه نده. زمان‌ها را با قالب HH:MM:SS,mmm بنویس و با گفتار واقعی هماهنگ کن. اگر بخشی گفتار ندارد، برای آن زیرنویس نساز. زبان اصلی را خودت تشخیص بده.";
     let result;
     let lastError;
     const models = ["gemini-3.8-flash", "gemini-3.5-flash-lite"];
     for (const model of models) {
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          job.message = "در حال ساخت زیرنویس دری با " + model + "…";
+          job.message = "در حال ساخت زیرنویس فارسی با " + model + "…";
           job.progress = 65;
           job.updatedAt = Date.now();
           result = await ai.models.generateContent({
@@ -145,7 +146,7 @@ async function processTranslation(jobId, file) {
     }
     job.status = "completed";
     job.progress = 100;
-    job.message = "زیرنویس دری آماده شد.";
+    job.message = "زیرنویس فارسی آماده شد.";
     job.srt = srt;
     job.videoPath = file.path;
     job.updatedAt = Date.now();
@@ -166,6 +167,52 @@ async function processTranslation(jobId, file) {
     }
   }
 }
+
+
+const ALLOWED_VIDEO_HOSTS = new Set(["youtube.com","www.youtube.com","m.youtube.com","youtu.be","youtube-nocookie.com","instagram.com","www.instagram.com","facebook.com","www.facebook.com","m.facebook.com","fb.watch","x.com","www.x.com","twitter.com","www.twitter.com","t.co"]);
+function validateVideoUrl(value) {
+  let parsed;
+  try { parsed = new URL(String(value || "").trim()); } catch { throw new Error("لینک معتبر نیست."); }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || !ALLOWED_VIDEO_HOSTS.has(parsed.hostname.toLowerCase())) {
+    throw new Error("فقط لینک عمومی HTTPS از YouTube، Instagram، Facebook و X پذیرفته می‌شود.");
+  }
+  return parsed.toString();
+}
+async function downloadAndTranslate(jobId, url) {
+  const job = jobs.get(jobId);
+  const prefix = path.join(os.tmpdir(), "social-" + jobId);
+  try {
+    job.message = "در حال دریافت ویدیو از لینک…"; job.progress = 8; job.updatedAt = Date.now();
+    await youtubedl.exec(url, { noPlaylist: true, format: "best[ext=mp4]/best", mergeOutputFormat: "mp4", output: prefix + ".%(ext)s", maxFilesize: "1G", socketTimeout: 30, retries: 2, noWarnings: true }, { timeout: 10 * 60 * 1000 });
+    const names = await fs.promises.readdir(os.tmpdir());
+    const files = names.filter(name => name.startsWith("social-" + jobId + ".")).map(name => path.join(os.tmpdir(), name));
+    if (!files.length) throw new Error("فایل دریافت نشد؛ ممکن است لینک خصوصی یا محدود باشد.");
+    const videoPath = files[0], stat = await fs.promises.stat(videoPath);
+    if (!stat.size || stat.size > 1024 * 1024 * 1024) throw new Error("اندازهٔ ویدیو خالی یا بیشتر از ۱ گیگابایت است.");
+    job.message = "ویدیو دریافت شد؛ ترجمه آغاز می‌شود…"; job.progress = 25; job.updatedAt = Date.now();
+    await processTranslation(jobId, { path: videoPath, mimetype: "video/mp4", originalname: "social-video.mp4", size: stat.size });
+  } catch (error) {
+    console.error("Social video download failed:", error);
+    const current = jobs.get(jobId);
+    if (current && current.status !== "completed") { current.status = "failed"; current.progress = 0; current.message = error.message || "دریافت ویدیو ناموفق شد."; current.updatedAt = Date.now(); }
+    const names = await fs.promises.readdir(os.tmpdir()).catch(() => []);
+    for (const name of names.filter(n => n.startsWith("social-" + jobId + "."))) await fs.promises.unlink(path.join(os.tmpdir(), name)).catch(() => {});
+  }
+}
+app.post("/api/translate-url", (req, res) => {
+  let url;
+  try { url = validateVideoUrl(req.body?.url); } catch (error) { return res.status(400).json({ success: false, message: error.message }); }
+  if (!process.env.GEMINI_API_KEY) return res.status(503).json({ success: false, message: "کلید Gemini در سرور تنظیم نشده است." });
+  const id = crypto.randomUUID();
+  jobs.set(id, { status: "processing", message: "درخواست دریافت لینک ثبت شد.", progress: 5, srt: null, sourceUrl: url, updatedAt: Date.now() });
+  res.status(202).json({ success: true, jobId: id, status: "processing" });
+  downloadAndTranslate(id, url).catch(error => console.error("Unexpected link job error:", error));
+});
+app.get("/api/jobs/:id/original", (req, res) => {
+  const job = jobs.get(req.params.id);
+  if (!job?.videoPath || !fs.existsSync(job.videoPath)) return res.status(404).json({ success: false, message: "فایل اصلی پیدا نشد." });
+  res.download(job.videoPath, "original-video.mp4");
+});
 
 app.post("/api/translate", upload.single("video"), (req, res) => {
   if (!process.env.GEMINI_API_KEY) {
@@ -212,7 +259,7 @@ app.post("/api/dub", async (req, res) => {
   try {
     const srt = String(req.body?.srt || "").slice(0, 12000);
     const sourceJob = jobs.get(String(req.body?.jobId || ""));
-    const language = req.body?.language === "fa" ? "فارسی معیار" : "دری افغانستان";
+    const language = "فارسی معیار";
     if (!srt.trim()) return res.status(400).json({ success: false, message: "اول زیرنویس را تولید کنید." });
     if (!process.env.GEMINI_API_KEY) return res.status(503).json({ success: false, message: "کلید Gemini تنظیم نشده است." });
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -285,7 +332,8 @@ app.get("/api/jobs/:id", (req, res) => {
     status: job.status,
     progress: job.status === "completed" ? 100 : (job.progress || 0),
     message: job.message,
-    srt: job.status === "completed" ? job.srt : undefined
+    srt: job.status === "completed" ? job.srt : undefined,
+    sourceUrl: job.sourceUrl || undefined
   });
 });
 
