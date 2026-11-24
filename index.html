@@ -126,7 +126,7 @@
     const fileName = document.getElementById("fileName");
     const message = document.getElementById("message");
     const submitButton = form.querySelector('button[type="submit"]');
-    document.querySelectorAll('input[name="outputMode"]').forEach(input => input.addEventListener("change", () => { submitButton.textContent = input.value === "dub" ? "ساخت دوبله صوتی فارسی" : "ساخت زیرنویس دری"; }));
+    document.querySelectorAll('input[name="outputMode"]').forEach(input => input.addEventListener("change", () => { submitButton.textContent = input.value === "dub" ? "ساخت دوبله صوتی فارسی" : "ساخت زیرنویس فارسی"; }));
     const progressWrap = document.getElementById("progressWrap");
     const progressFill = document.getElementById("progressFill");
     const progressValue = document.getElementById("progressValue");
@@ -158,9 +158,18 @@
         const result = await response.json();
         if (!response.ok) throw new Error(result.message || "وضعیت پردازش دریافت نشد.");
         if (result.status === "completed") {
-          if (result.sourceUrl) { const originalLink = document.createElement("a"); originalLink.href = "/api/jobs/" + encodeURIComponent(jobId) + "/original"; originalLink.textContent = "دانلود ویدیوی اصلی"; originalLink.download = "original-video.mp4"; originalLink.style.display = "block"; originalLink.style.marginTop = "12px"; originalLink.style.color = "#69e5c5"; message.appendChild(originalLink); }
           setProgress(100, "ترجمه تکمیل شد");
           showMessage(result.message || "زیرنویس فارسی آماده شد.", true);
+          if (result.sourceUrl) {
+            const originalLink = document.createElement("a");
+            originalLink.href = "/api/jobs/" + encodeURIComponent(jobId) + "/original";
+            originalLink.textContent = "دانلود ویدیوی اصلی";
+            originalLink.download = "original-video.mp4";
+            originalLink.style.display = "block";
+            originalLink.style.marginTop = "12px";
+            originalLink.style.color = "#69e5c5";
+            message.appendChild(originalLink);
+          }
 
           const dubPanel = document.createElement("div");
           dubPanel.style.marginTop = "16px";
@@ -293,7 +302,7 @@
       } finally {
         activeJob = false;
         submitButton.disabled = false;
-        submitButton.textContent = document.querySelector('input[name="outputMode"]:checked')?.value === "dub" ? "ساخت دوبله صوتی فارسی" : "ساخت زیرنویس دری";
+        submitButton.textContent = document.querySelector('input[name="outputMode"]:checked')?.value === "dub" ? "ساخت دوبله صوتی فارسی" : "ساخت زیرنویس فارسی";
       }
     });
   </script>
