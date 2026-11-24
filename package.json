@@ -4,7 +4,8 @@
   "description": "AI Video Translator",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "postinstall": "node node_modules/ffmpeg-static/install.js"
   },
   "dependencies": {
     "express": "^4.21.2",
