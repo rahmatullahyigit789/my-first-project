@@ -5,6 +5,8 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 const crypto = require("crypto");
+const { spawn } = require("child_process");
+const ffmpegPath = require("ffmpeg-static");
 const { GoogleGenAI, createPartFromUri } = require("@google/genai");
 
 const app = express();
@@ -39,7 +41,9 @@ function cleanupJobs() {
   for (const [id, job] of jobs) {
     if (job.updatedAt < cutoff && job.status !== "processing") {
       jobs.delete(id);
-      if (job.audioPath) fs.promises.unlink(job.audioPath).catch(() => {});
+      for (const filePath of [job.audioPath, job.videoPath, job.outputVideoPath]) {
+      if (filePath) fs.promises.unlink(filePath).catch(() => {});
+    }
     }
   }
 }
@@ -143,6 +147,7 @@ async function processTranslation(jobId, file) {
     job.progress = 100;
     job.message = "زیرنویس دری آماده شد.";
     job.srt = srt;
+    job.videoPath = file.path;
     job.updatedAt = Date.now();
   } catch (error) {
     console.error("Translation job failed:", error);
@@ -154,7 +159,7 @@ async function processTranslation(jobId, file) {
       : (error.message || "در ترجمه ویدیو خطا رخ داد.");
     job.updatedAt = Date.now();
   } finally {
-    await fs.promises.unlink(file.path).catch(() => {});
+    if (job.status !== "completed") await fs.promises.unlink(file.path).catch(() => {});
     if (remoteFile?.name && process.env.GEMINI_API_KEY) {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       ai.files.delete({ name: remoteFile.name }).catch(() => {});
@@ -192,9 +197,21 @@ app.post("/api/translate", upload.single("video"), (req, res) => {
 });
 
 
+function muxDubbedVideo(videoPath, audioPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    const args = ["-y", "-i", videoPath, "-i", audioPath, "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", outputPath];
+    const child = spawn(ffmpegPath, args);
+    let stderr = "";
+    child.stderr.on("data", chunk => { stderr += chunk.toString(); });
+    child.on("error", reject);
+    child.on("close", code => code === 0 ? resolve() : reject(new Error("ساخت ویدیوی MP4 ناموفق شد: " + stderr.slice(-700))));
+  });
+}
+
 app.post("/api/dub", async (req, res) => {
   try {
     const srt = String(req.body?.srt || "").slice(0, 12000);
+    const sourceJob = jobs.get(String(req.body?.jobId || ""));
     const language = req.body?.language === "fa" ? "فارسی معیار" : "دری افغانستان";
     if (!srt.trim()) return res.status(400).json({ success: false, message: "اول زیرنویس را تولید کنید." });
     if (!process.env.GEMINI_API_KEY) return res.status(503).json({ success: false, message: "کلید Gemini تنظیم نشده است." });
@@ -227,8 +244,17 @@ app.post("/api/dub", async (req, res) => {
       throw new Error("خروجی صوتی Gemini فایل WAV معتبر نیست؛ دوباره تلاش کنید.");
     }
     await fs.promises.writeFile(audioPath, audioBuffer);
-    jobs.set("dub-" + id, { status: "completed", audioPath, updatedAt: Date.now() });
-    res.json({ success: true, audioUrl: "/api/dubs/" + id + "/audio", message: "فایل دوبله آماده شد." });
+    const dubJob = { status: "completed", audioPath, updatedAt: Date.now() };
+    let videoUrl = null;
+    if (sourceJob?.videoPath && fs.existsSync(sourceJob.videoPath)) {
+      const outputVideoPath = path.join(os.tmpdir(), "translated-" + id + ".mp4");
+      await muxDubbedVideo(sourceJob.videoPath, audioPath, outputVideoPath);
+      dubJob.outputVideoPath = outputVideoPath;
+      sourceJob.outputVideoPath = outputVideoPath;
+      videoUrl = "/api/dubs/" + id + "/video";
+    }
+    jobs.set("dub-" + id, dubJob);
+    res.json({ success: true, audioUrl: "/api/dubs/" + id + "/audio", videoUrl, message: videoUrl ? "ویدیوی دوبله‌شده آمادهٔ دانلود است." : "فایل صوتی آماده شد؛ فایل ویدیوی اصلی برای ترکیب پیدا نشد." });
   } catch (error) {
     console.error("Dubbing failed:", error);
     res.status(502).json({ success: false, message: error.message || "ساخت دوبله ناموفق شد." });
@@ -241,6 +267,14 @@ app.get("/api/dubs/:id/audio", async (req, res) => {
   res.setHeader("Content-Type", "audio/wav");
   res.setHeader("Content-Disposition", 'attachment; filename="video-dub.wav"');
   res.sendFile(job.audioPath);
+});
+
+app.get("/api/dubs/:id/video", (req, res) => {
+  const job = jobs.get("dub-" + req.params.id);
+  if (!job?.outputVideoPath || !fs.existsSync(job.outputVideoPath)) {
+    return res.status(404).json({ success: false, message: "ویدیوی نهایی پیدا نشد." });
+  }
+  res.download(job.outputVideoPath, "translated-video.mp4");
 });
 
 app.get("/api/jobs/:id", (req, res) => {
