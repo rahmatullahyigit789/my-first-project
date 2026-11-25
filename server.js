@@ -55,6 +55,25 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function withGeminiRetry(label, operation) {
+  let lastError;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      const status = Number(error?.status || error?.code || error?.response?.status || 0);
+      if (![408, 429, 500, 502, 503, 504].includes(status) || attempt === 3) throw error;
+      const delay = status === 429
+        ? Math.min(60000, 15000 * (attempt + 1))
+        : Math.min(30000, 5000 * Math.pow(2, attempt));
+      console.warn(`${label} temporary Gemini error ${status}; retry ${attempt + 1}/3 in ${delay}ms`);
+      await sleep(delay);
+    }
+  }
+  throw lastError;
+}
+
 function isRetryable(error) {
   const status = Number(error?.status || error?.code || error?.response?.status || 0);
   const code = error?.code || error?.cause?.code || "";
@@ -299,19 +318,19 @@ app.post("/api/dub", async (req, res) => {
       .replace(/\r/g, "")
       .split("\n").map(line => line.trim()).filter(Boolean).join(" ");
     if (!plainText) return res.status(400).json({ success: false, message: "متن زیرنویس خالی است." });
-    const translated = await ai.models.generateContent({
+    const translated = await withGeminiRetry("Dub text translation", () => ai.models.generateContent({
       model: "gemini-3.8-flash",
       contents: "این متن زیرنویس را به " + language + " روان و طبیعی ترجمه کن. فقط متن ترجمه‌شده را برگردان، بدون توضیح و بدون زمان‌بندی:\n\n" + plainText,
       config: { temperature: 0.2 }
-    });
+    }));
     const speechText = String(translated.text || "").trim();
     if (!speechText) throw new Error("ترجمه برای دوبله تولید نشد.");
-    const speech = await ai.interactions.create({
+    const speech = await withGeminiRetry("Dub audio generation", () => ai.interactions.create({
       model: "gemini-3.8-flash-tts",
       input: [{ type: "user_input", content: [{ type: "text", text: speechText }] }],
       response_format: { type: "audio" },
       generation_config: { speech_config: [{ voice: "Kore" }] }
-    });
+    }));
     const audioBase64 = speech.output_audio?.data;
     if (!audioBase64) throw new Error("فایل صوتی از Gemini دریافت نشد.");
     const id = crypto.randomUUID();
@@ -334,7 +353,13 @@ app.post("/api/dub", async (req, res) => {
     res.json({ success: true, audioUrl: "/api/dubs/" + id + "/audio", videoUrl, message: videoUrl ? "ویدیوی دوبله‌شده آمادهٔ دانلود است." : "فایل صوتی آماده شد؛ فایل ویدیوی اصلی برای ترکیب پیدا نشد." });
   } catch (error) {
     console.error("Dubbing failed:", error);
-    res.status(502).json({ success: false, message: error.message || "ساخت دوبله ناموفق شد." });
+    const status = Number(error?.status || error?.code || error?.response?.status || 0);
+    const message = status === 503
+      ? "سرویس ساخت صدای گوگل فعلاً شلوغ است. سرور چند بار تلاش کرد؛ لطفاً چند دقیقه بعد دوباره دوبله را بزنید."
+      : status === 429
+        ? "سهمیهٔ درخواست‌های سرویس گوگل موقتاً پُر شده است. کمی بعد دوباره تلاش کنید."
+        : (error.message || "ساخت دوبله ناموفق شد.");
+    res.status(502).json({ success: false, message });
   }
 });
 
