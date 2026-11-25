@@ -195,10 +195,36 @@ async function downloadAndTranslate(jobId, url) {
   } catch (error) {
     console.error("Social video download failed:", error);
     const current = jobs.get(jobId);
-    if (current && current.status !== "completed") { current.status = "failed"; current.progress = 0; const detail = String(error?.stderr || error?.message || "");
-      current.message = /Sign in to confirm|not a bot|cookies/i.test(detail)
-        ? "یوتیوب دانلود از سرور را متوقف کرده و تأیید ورود می‌خواهد. این لینک از داخل سرور قابل دریافت نیست. اگر حق استفاده از ویدیو را دارید، فایل ویدیو را از دستگاه خود انتخاب و در بخش آپلود بفرستید؛ رمز یا کوکی حساب گوگل را ارسال نکنید."
-        : (error.message || "دریافت ویدیو ناموفق شد."); current.updatedAt = Date.now(); }
+    const detail = [
+      error?.stderr, error?.stdout, error?.message,
+      error?.cause?.message, error?.shortMessage
+    ].filter(Boolean).join("\\n").slice(0, 5000);
+    const lower = detail.toLowerCase();
+    let userMessage;
+    if (/sign in to confirm|not a bot|confirm you.re not a bot|cookies/i.test(lower)) {
+      userMessage = "یوتیوب دانلود از سرور را به‌دلیل درخواست تأیید انسانی متوقف کرد. این لینک فعلاً از سرور قابل دریافت نیست. اگر اجازهٔ استفاده از ویدیو را دارید، فایل را از گوشی آپلود کنید؛ رمز یا کوکی گوگل را نفرستید.";
+    } else if (/private video|video is private|private playlist/i.test(lower)) {
+      userMessage = "این ویدیو خصوصی است و سرور به آن دسترسی ندارد. لینک عمومی یا فایل ویدیویی را که اجازهٔ استفاده از آن را دارید وارد کنید.";
+    } else if (/video unavailable|has been removed|this video is unavailable/i.test(lower)) {
+      userMessage = "ویدیو در دسترس نیست یا حذف شده است. لینک را بررسی کنید یا فایل مجاز ویدیو را از گوشی آپلود کنید.";
+    } else if (/age.restricted|confirm your age|age verification/i.test(lower)) {
+      userMessage = "یوتیوب برای این ویدیو تأیید سن می‌خواهد و سرور نمی‌تواند آن را دریافت کند. فایل مجاز را از دستگاه خود آپلود کنید.";
+    } else if (/not available in your country|geo.restricted|blocked in your country/i.test(lower)) {
+      userMessage = "این ویدیو در منطقهٔ سرور محدود شده است و دانلود انجام نشد. فایل مجاز را از دستگاه خود آپلود کنید.";
+    } else if (/timed out|timeout|connection reset|network is unreachable|temporary failure|unable to download/i.test(lower)) {
+      userMessage = "ارتباط سرور با منبع ویدیو برقرار نشد یا زمان درخواست تمام شد. چند دقیقه بعد دوباره امتحان کنید.";
+    } else if (/unsupported url|not a valid url/i.test(lower)) {
+      userMessage = "قالب این لینک پشتیبانی نمی‌شود. لینک مستقیم و عمومی YouTube، Instagram، Facebook یا X را وارد کنید.";
+    } else {
+      const diagnostic = detail.replace(/https?:\\/\\/\\S+/g, "[video-url]").replace(/\\s+/g, " ").trim().slice(0, 240);
+      userMessage = "دانلود ویدیو ناموفق شد. جزئیات فنی برای بررسی ثبت شد." + (diagnostic ? " علت گزارش‌شده: " + diagnostic : " لطفاً لینک عمومی دیگری را امتحان کنید.");
+    }
+    if (current && current.status !== "completed") {
+      current.status = "failed";
+      current.progress = 0;
+      current.message = userMessage;
+      current.updatedAt = Date.now();
+    }
     const names = await fs.promises.readdir(os.tmpdir()).catch(() => []);
     for (const name of names.filter(n => n.startsWith("social-" + jobId + "."))) await fs.promises.unlink(path.join(os.tmpdir(), name)).catch(() => {});
   }
@@ -361,6 +387,5 @@ async function refreshYoutubeDl() {
   }
 }
 
-refreshYoutubeDl().finally(() => {
-  app.listen(PORT, "0.0.0.0", () => console.log(`Server running on port ${PORT}`));
-});
+app.listen(PORT, "0.0.0.0", () => console.log(`Server running on port ${PORT}`));
+refreshYoutubeDl();
