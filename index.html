@@ -185,8 +185,19 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ srt: result.srt, language: "fa", jobId })
               });
-              const dubResult = await dubResponse.json();
-              if (!dubResponse.ok || !dubResult.success) throw new Error(dubResult.message || "ساخت دوبله ناموفق شد.");
+              const started = await dubResponse.json();
+              if (!dubResponse.ok || !started.success || !started.dubJobId) throw new Error(started.message || "ثبت درخواست دوبله ناموفق شد.");
+              let dubResult;
+              for (;;) {
+                dubButton.textContent = "در حال ساخت دوبله… " + (dubButton.dataset.progress || "");
+                await new Promise(resolve => setTimeout(resolve, 2500));
+                const statusResponse = await fetch("/api/dubs/" + encodeURIComponent(started.dubJobId) + "/status");
+                dubResult = await statusResponse.json();
+                if (!statusResponse.ok) throw new Error(dubResult.message || "وضعیت دوبله دریافت نشد.");
+                dubButton.textContent = (dubResult.message || "در حال ساخت دوبله…") + (dubResult.progress ? " " + dubResult.progress + "٪" : "");
+                if (dubResult.status === "completed") break;
+                if (dubResult.status === "failed") throw new Error(dubResult.message || "ساخت دوبله ناموفق شد.");
+              }
               const audioLink = document.createElement("a");
               audioLink.href = dubResult.audioUrl;
               audioLink.textContent = "دانلود دوبله صوتی (WAV)";
