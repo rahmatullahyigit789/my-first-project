@@ -216,7 +216,7 @@ async function downloadAndTranslate(jobId, url) {
     } else if (/unsupported url|not a valid url/i.test(lower)) {
       userMessage = "قالب این لینک پشتیبانی نمی‌شود. لینک مستقیم و عمومی YouTube، Instagram، Facebook یا X را وارد کنید.";
     } else {
-      const diagnostic = detail.replace(/https?:\\/\\/\\S+/g, "[video-url]").replace(/\\s+/g, " ").trim().slice(0, 240);
+      const diagnostic = detail.replace(/https?:\/\/\S+/g, "[video-url]").replace(/\s+/g, " ").trim().slice(0, 240);
       userMessage = "دانلود ویدیو ناموفق شد. جزئیات فنی برای بررسی ثبت شد." + (diagnostic ? " علت گزارش‌شده: " + diagnostic : " لطفاً لینک عمومی دیگری را امتحان کنید.");
     }
     if (current && current.status !== "completed") {
