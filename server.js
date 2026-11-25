@@ -304,27 +304,29 @@ function muxDubbedVideo(videoPath, audioPath, outputPath) {
   });
 }
 
-app.post("/api/dub", async (req, res) => {
+async function runDubJob(id, srt, sourceJob) {
+  const dubJob = jobs.get("dub-" + id);
+  let audioPath;
   try {
-    const srt = String(req.body?.srt || "").slice(0, 12000);
-    const sourceJob = jobs.get(String(req.body?.jobId || ""));
-    const language = "فارسی معیار";
-    if (!srt.trim()) return res.status(400).json({ success: false, message: "اول زیرنویس را تولید کنید." });
-    if (!process.env.GEMINI_API_KEY) return res.status(503).json({ success: false, message: "کلید Gemini تنظیم نشده است." });
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    dubJob.message = "در حال آماده‌سازی متن دوبله…";
+    dubJob.progress = 10;
     const plainText = srt
       .replace(/^\s*\d+\s*$/gm, "")
       .replace(/^\s*\d{2}:\d{2}:\d{2},\d{3}\s*-->.*$/gm, "")
       .replace(/\r/g, "")
       .split("\n").map(line => line.trim()).filter(Boolean).join(" ");
-    if (!plainText) return res.status(400).json({ success: false, message: "متن زیرنویس خالی است." });
+    if (!plainText) throw new Error("متن زیرنویس خالی است.");
     const translated = await withGeminiRetry("Dub text translation", () => ai.models.generateContent({
       model: "gemini-3.8-flash",
-      contents: "این متن زیرنویس را به " + language + " روان و طبیعی ترجمه کن. فقط متن ترجمه‌شده را برگردان، بدون توضیح و بدون زمان‌بندی:\n\n" + plainText,
+      contents: "این متن زیرنویس را به فارسی معیار روان و طبیعی ترجمه کن. فقط متن ترجمه‌شده را برگردان، بدون توضیح و بدون زمان‌بندی:\n\n" + plainText,
       config: { temperature: 0.2 }
     }));
     const speechText = String(translated.text || "").trim();
     if (!speechText) throw new Error("ترجمه برای دوبله تولید نشد.");
+    dubJob.message = "متن آماده شد؛ در حال ساخت صدای فارسی…";
+    dubJob.progress = 45;
+    dubJob.updatedAt = Date.now();
     const speech = await withGeminiRetry("Dub audio generation", () => ai.interactions.create({
       model: "gemini-3.8-flash-tts",
       input: [{ type: "user_input", content: [{ type: "text", text: speechText }] }],
@@ -333,34 +335,68 @@ app.post("/api/dub", async (req, res) => {
     }));
     const audioBase64 = speech.output_audio?.data;
     if (!audioBase64) throw new Error("فایل صوتی از Gemini دریافت نشد.");
-    const id = crypto.randomUUID();
-    const audioPath = path.join(os.tmpdir(), "dub-" + id + ".wav");
     const audioBuffer = Buffer.from(audioBase64, "base64");
     if (audioBuffer.length < 44 || audioBuffer.toString("ascii", 0, 4) !== "RIFF" || audioBuffer.toString("ascii", 8, 12) !== "WAVE") {
       throw new Error("خروجی صوتی Gemini فایل WAV معتبر نیست؛ دوباره تلاش کنید.");
     }
+    audioPath = path.join(os.tmpdir(), "dub-" + id + ".wav");
     await fs.promises.writeFile(audioPath, audioBuffer);
-    const dubJob = { status: "completed", audioPath, updatedAt: Date.now() };
-    let videoUrl = null;
+    dubJob.audioPath = audioPath;
+    dubJob.message = "صدای دوبله آماده شد؛ در حال ساخت ویدیوی نهایی…";
+    dubJob.progress = 80;
+    dubJob.updatedAt = Date.now();
     if (sourceJob?.videoPath && fs.existsSync(sourceJob.videoPath)) {
       const outputVideoPath = path.join(os.tmpdir(), "translated-" + id + ".mp4");
       await muxDubbedVideo(sourceJob.videoPath, audioPath, outputVideoPath);
       dubJob.outputVideoPath = outputVideoPath;
       sourceJob.outputVideoPath = outputVideoPath;
-      videoUrl = "/api/dubs/" + id + "/video";
     }
-    jobs.set("dub-" + id, dubJob);
-    res.json({ success: true, audioUrl: "/api/dubs/" + id + "/audio", videoUrl, message: videoUrl ? "ویدیوی دوبله‌شده آمادهٔ دانلود است." : "فایل صوتی آماده شد؛ فایل ویدیوی اصلی برای ترکیب پیدا نشد." });
+    dubJob.status = "completed";
+    dubJob.progress = 100;
+    dubJob.message = dubJob.outputVideoPath
+      ? "ویدیوی نهایی با دوبله فارسی آماده دانلود است."
+      : "صدای دوبله فارسی آماده دانلود است.";
+    dubJob.updatedAt = Date.now();
   } catch (error) {
     console.error("Dubbing failed:", error);
     const status = Number(error?.status || error?.code || error?.response?.status || 0);
-    const message = status === 503
-      ? "سرویس ساخت صدای گوگل فعلاً شلوغ است. سرور چند بار تلاش کرد؛ لطفاً چند دقیقه بعد دوباره دوبله را بزنید."
+    dubJob.status = "failed";
+    dubJob.progress = 0;
+    dubJob.message = status === 503
+      ? "سرویس ساخت صدای گوگل فعلاً شلوغ است. چند دقیقه بعد دوباره تلاش کنید."
       : status === 429
-        ? "سهمیهٔ درخواست‌های سرویس گوگل موقتاً پُر شده است. کمی بعد دوباره تلاش کنید."
+        ? "سهمیه درخواست‌های سرویس گوگل موقتاً پُر شده است. کمی بعد دوباره تلاش کنید."
         : (error.message || "ساخت دوبله ناموفق شد.");
-    res.status(502).json({ success: false, message });
+    dubJob.updatedAt = Date.now();
+    if (audioPath) await fs.promises.unlink(audioPath).catch(() => {});
   }
+}
+
+app.post("/api/dub", (req, res) => {
+  const srt = String(req.body?.srt || "").slice(0, 12000);
+  const sourceJob = jobs.get(String(req.body?.jobId || ""));
+  if (!srt.trim()) return res.status(400).json({ success: false, message: "اول زیرنویس را تولید کنید." });
+  if (!process.env.GEMINI_API_KEY) return res.status(503).json({ success: false, message: "کلید Gemini تنظیم نشده است." });
+  const id = crypto.randomUUID();
+  jobs.set("dub-" + id, {
+    status: "processing", progress: 2, message: "درخواست دوبله ثبت شد؛ پردازش آغاز می‌شود.",
+    audioPath: null, outputVideoPath: null, updatedAt: Date.now()
+  });
+  res.status(202).json({ success: true, dubJobId: id, status: "processing" });
+  runDubJob(id, srt, sourceJob).catch(error => console.error("Unexpected dubbing job error:", error));
+});
+
+app.get("/api/dubs/:id/status", (req, res) => {
+  const job = jobs.get("dub-" + req.params.id);
+  if (!job) return res.status(404).json({ success: false, message: "درخواست دوبله پیدا نشد؛ صفحه را تازه کنید و دوباره امتحان کنید." });
+  res.json({
+    success: job.status !== "failed",
+    status: job.status,
+    progress: job.progress || 0,
+    message: job.message,
+    audioUrl: job.status === "completed" && job.audioPath ? "/api/dubs/" + req.params.id + "/audio" : null,
+    videoUrl: job.status === "completed" && job.outputVideoPath ? "/api/dubs/" + req.params.id + "/video" : null
+  });
 });
 
 app.get("/api/dubs/:id/audio", async (req, res) => {
